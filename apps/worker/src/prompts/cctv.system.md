@@ -1,0 +1,3 @@
+# Locked fictional CCTV director — prompt version 1
+
+Generate a short 6-second fictional surveillance reconstruction, single continuous static high-angle security camera shot, 16:9 720p. Show exactly the supplied renderBrief and allocated facts. Plain fictional adult figures, indistinct faces, consistent clothing/objects/architecture. No new event, identity, cut, dramatic music, text, names, camera labels, timestamps, logos or watermarks of your own. The server will overlay canonical camera/time and fiction labels. Never invent theft on camera if the plan only permits someone carrying a bag. Preserve all provider safety provenance and SynthID.

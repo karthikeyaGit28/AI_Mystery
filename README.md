@@ -1,0 +1,112 @@
+# AI Mystery Room
+
+A single-player detective game that turns a fictional premise into a case with four suspects, eight evidence items, and one immutable answer. The investigation includes fictional messaging threads, two photos, a playable surveillance reconstruction, documents, a public timeline, bookmarks, hints, and a final accusation.
+
+`spec.md` is retained unchanged as the implementation baseline.
+
+## Start locally
+
+Prerequisites: Node.js **22.23.4** (the tested runtime; see `.nvmrc`), npm, and Docker Desktop with Compose. The npm media packages provide ffmpeg and ffprobe for supported platforms; set absolute `FFMPEG_PATH` / `FFPROBE_PATH` values to use your own binaries.
+
+```sh
+npm install
+cp .env.example .env
+docker compose up -d
+npm run infra:check
+npm run dev
+```
+
+On PowerShell, use `Copy-Item .env.example .env` instead of `cp` if preferred. `scripts/dev.ps1` can start the app using a project-local portable Node runtime when one exists in `.tools`.
+
+Open **http://localhost:5173**. The API listens on port 4000; the worker runs as a separate process. MongoDB uses port 27017, Redis 6379, and MinIO 9000 (console: 9001). Compose binds services to loopback, initializes the private bucket, and persists data in named volumes. The example storage credentials are for local development only.
+
+The default `AI_MODE=mock` needs no Google key. Its header, images, and video visibly identify **Demo Mode**. It runs the complete persistent game with deterministic test cases and actual playable test media; it does not claim to generate live AI evidence.
+
+## Enable Gemini
+
+Edit your untracked `.env`:
+
+```dotenv
+AI_MODE=gemini
+GEMINI_API_KEY=your-key-from-google-ai-studio
+GEMINI_TEXT_MODEL=gemini-3.8-flash
+GEMINI_IMAGE_MODEL=gemini-nano-banana-2.1
+GEMINI_VIDEO_MODEL=gemini-omni-1.1-flash
+```
+
+Run `npm run provider:check` for a text/API capability check, then `npm run provider:check -w @amr/worker -- --full` before accepting live traffic. The full smoke test generates a case, two photos, and video or the AI-frame fallback; these calls incur provider usage. Model availability, billing, and quotas depend on the Google project. Model IDs remain configurable because the spec's defaults may not be enabled for a particular account. The worker also checks text capability at live startup. All provider calls run on the server using the official SDK; browser variables must never contain secrets.
+
+The video pipeline first attempts the configured video model. When video is unavailable, it generates two AI surveillance frames and builds a labeled H.264 MP4 with server-authored camera/time overlays. Images have accessible captions and the recording has a transcript. Failure of both paths fails the case recoverably; it never publishes missing footage or substitutes stock footage.
+
+Relevant official references: [Interactions API](https://ai.google.dev/api/interactions-api), [structured output](https://ai.google.dev/gemini-api/docs/structured-output), [image generation](https://ai.google.dev/gemini-api/docs/image-generation), and [Omni video](https://ai.google.dev/gemini-api/docs/omni).
+
+## Architecture
+
+```text
+apps/web         React 19 / Vite / Router / TanStack Query
+apps/api         Express REST / guest ownership / hints / scoring
+apps/worker      BullMQ worker / Gemini and mock providers / media / cleanup
+packages/shared  Public Zod contracts and TypeScript DTOs only
+packages/server  Private Mongoose models, configuration, queues, S3 storage
+e2e              Playwright desktop and mobile journeys
+```
+
+The API persists cases in MongoDB and enqueues durable Redis jobs. Generation constructs and validates a private blueprint, has an independent reviewer solve the public clues, freezes the solution, renders evidence from canonical facts, validates media, and publishes only a complete case. Worker checkpoints reuse the locked blueprint, text, frames, and completed media after retries or crashes. No LLM is called to decide the verdict.
+
+Each case has exactly two chats, two photos, one CCTV reconstruction, and three documents. Three or more supporting clues span at least two modalities. The public package excludes private schemas and solution information. Public responses are built from explicit allowlists and validated again before being returned.
+
+Scoring: a wrong suspect scores 0; a correct suspect scores 70 plus 10 per unique supporting citation (maximum 20), plus a hint bonus of 10/5/0 for zero/one/two-or-three hints. Optional free-text reasoning is retained but not graded. The final accusation is atomic and cannot be changed.
+
+## Commands and verification
+
+```sh
+npm run format:check
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run e2e:install
+npm run e2e
+```
+
+The first five checks run without Google credentials. Media tests execute the real ffmpeg pipeline. API tests exercise ownership, DTO secrecy, invalid inputs, cookies/origins, hints, races, and deterministic scoring through injected test infrastructure. Browser tests require the real local MongoDB/Redis/private-storage services and exercise desktop and phone layouts, evidence loading, video playback, refresh persistence, hints, accusation, score, and deletion. Playwright uses Demo Mode and never spends Google API credits. Set `PLAYWRIGHT_CHANNEL=chrome` to use an installed Chrome instead of downloading Playwright Chromium.
+
+For environments without Docker, the optional `npm run services:test` starts a real downloaded MongoDB process, an installed native Redis executable, and a filesystem S3 test server. Set `TEST_REDIS_BINARY` to your Redis executable (or place a portable build in `.tools/redis`). Run the app and browser tests with `STORAGE_ACCESS_KEY=S3RVER` and `STORAGE_SECRET_KEY=S3RVER`. This infrastructure is for tests only and must not be exposed publicly. Native test dependencies never replace the production MongoDB/Redis/S3 architecture.
+
+On this Windows workspace, the portable Node and Redis binaries are already available. To run the local demo without Docker, use two PowerShell terminals:
+
+```powershell
+# Terminal 1: local test infrastructure
+$env:Path = "$PWD\.tools\node-v22.23.4-win-x64;$env:Path"
+npm.cmd run services:test
+
+# Terminal 2: app, API, and worker
+$env:STORAGE_ACCESS_KEY = 'S3RVER'
+$env:STORAGE_SECRET_KEY = 'S3RVER'
+.\scripts\dev.ps1
+```
+
+Verification on 2026-10-28: 87 automated tests, all four desktop/mobile Playwright gameplay journeys, and two browser source-isolation checks passed against real local MongoDB/Redis and S3-compatible test storage. Formatting, lint, TypeScript checking, and production builds passed. Browser checks include actual image/video playback, owner isolation, solution secrecy, saved review/bookmark state, hint limits, correct/incorrect scoring, and deletion. Live Gemini smoke testing remains blocked by the absence of a configured Google API key.
+
+Implementation choices: the interface uses tokenized CSS and accessible native dialogs instead of Tailwind/Radix. Private media uses authenticated, signed, expiring streaming URLs rather than exposing object-store URLs; the specification explicitly permits authenticated streaming. No hosted deployment was created because this workspace builds the independently deployable MERN services required by the specification.
+
+## API and ownership
+
+REST endpoints use `/api/v1`. Call `POST /sessions/guest` first. Browser requests include the HTTP-only guest cookie; mutating requests must originate from `WEB_ORIGIN`. Create, hints, and solve use `Idempotency-Key` headers. Routes cover case creation/list/status/retry/deletion, public case/evidence, progress, unlocked hints, one-time solve, and gated result. `GET /config` exposes only the public provider mode; `/health` is minimal liveness.
+
+Guest tokens contain 256 bits of randomness; only hashes are stored. Sessions slide for 30 days. Every case and media operation checks ownership, returning 404 to other guests. Media access is authenticated, short-lived, supports byte-range playback, and is revoked when the case is deleted. Keys, raw storage paths, private facts, future hints, and provider outputs do not appear in public case DTOs. CORS, origin checks, strict input limits, security headers, and rate limits are enabled. For a cross-site frontend deployment, add a deliberate cross-site cookie/CSRF configuration; the default is a same-site deployment.
+
+The default budget allows one active generation and three starts per guest in a rolling 24 hours. Stages use bounded retries and a 20-minute watchdog. The owner can manually retry a failed case at most twice. Cases and their private media expire 30 days after creation; maintenance performs cascading cleanup. Owner deletion revokes access immediately and schedules cleanup, with periodic recovery if enqueueing fails.
+
+## Deployment and troubleshooting
+
+Build with `npm ci && npm run build`. Deploy the frontend's `apps/web/dist` with SPA route fallback. Deploy API and worker independently from the source checkout using `npm run start -w @amr/api` and `npm run start -w @amr/worker`. Their start scripts execute TypeScript with the pinned `tsx` runtime; include workspace source and worker prompt files. Run the worker as a persistent service, never inside a serverless HTTP request. Use private managed MongoDB, Redis, and S3-compatible object storage. Provide a private bucket, HTTPS, a strong `SESSION_SECRET`, correct origins, and managed secrets. Production refuses mock mode or a missing Gemini key. A reverse proxy must preserve the configured origin; configure trusted proxies deliberately before changing IP-based limits.
+
+- **Queue unavailable:** start Redis and check `REDIS_URL`; no successful queue response is fabricated.
+- **Private media fails:** check the bucket bootstrap, S3 endpoint/region/credentials, and worker logs. Restarting does not regenerate a locked solution.
+- **Media tools unavailable:** npm must install the matching platform binaries; set explicit ffmpeg/ffprobe paths if your platform needs system packages.
+- **Gemini capability denied:** verify the key, billing, model ID, and account permissions. The app reports a safe failure; it does not silently switch live mode to demo.
+- **A guest case disappears:** cookies identify the owner. Another browser profile cannot access it. Cases also expire after 30 days.
+- **OneDrive/Windows tool access:** development tools may need normal filesystem access to resolve parent directories. Stop running processes before moving a synchronized checkout.
+
+No live Gemini verification is claimed without external credentials. The included test fixture fixes S-03 only in Demo Mode/tests; live cases use the generated immutable culprit. The MVP remains English-only and single-player, without accounts, payments, sharing, uploads, or live interrogation.

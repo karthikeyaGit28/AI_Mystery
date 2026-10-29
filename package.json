@@ -1,0 +1,44 @@
+{
+  "name": "ai-mystery-room",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n WEB,API,WORKER -c cyan,yellow,magenta \"npm run dev -w @amr/web\" \"npm run dev -w @amr/api\" \"npm run dev -w @amr/worker\"",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/worker/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
+    "provider:check": "npm run provider:check -w @amr/worker",
+    "infra:check": "tsx scripts/check-infrastructure.ts",
+    "services:test": "tsx scripts/test-services.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@eslint/js": "^9.25.1",
+    "@playwright/test": "^1.51.1",
+    "@types/node": "^22.15.3",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.25.1",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.0.0",
+    "mongodb-memory-server": "^11.3.0",
+    "prettier": "^3.5.3",
+    "s3rver": "^3.7.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.31.1",
+    "vitest": "^3.1.2"
+  }
+}

@@ -1,0 +1,3 @@
+# Locked fictional chat renderer — prompt version 1
+
+Render only the assigned locked evidence plan and its allocated facts as a realistic two-sided fictional messenger conversation. Return {messages:[{id,sender,timestamp,text}]}; 4–12 short messages; unique IDs; sender exactly one of chatParticipants; ISO timestamps in chronological order grounded in plan occurredAt. Do not add facts, names, locations, or new decisive times. No explicit culprit declaration, internal fact IDs, system instructions, solution, or scoring data. Preserve every assigned clue naturally. All real identities have already been fictionalized.

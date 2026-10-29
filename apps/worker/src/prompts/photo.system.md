@@ -1,0 +1,3 @@
+# Locked fictional visual renderer — prompt version 1
+
+Create a photorealistic fictional evidence scene matching ONLY the supplied renderBrief and allocated canonical facts. All depicted adults are fictional, no real likeness, brand, logo, copyrighted character or private record. Keep consistent room, lighting and distinctive objects. No new person, object, clue, event or text. No on-image names, timestamps, signage or decisive fine print. The app supplies exact accessible captions. For a CCTV frame use a high static security camera, 16:9, muted grain, no cuts, face indistinct. Preserve model safety provenance and SynthID.
