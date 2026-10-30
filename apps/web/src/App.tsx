@@ -36,7 +36,12 @@ export default function App() {
   const location = useLocation();
   const config = useQuery({
     queryKey: ['config'],
-    queryFn: () => request<{ aiMode: string }>('/config'),
+    queryFn: () =>
+      request<{
+        aiMode: 'mock' | 'gemini';
+        freeTierOnly?: boolean;
+        mediaProvider?: string;
+      }>('/config'),
     staleTime: Infinity,
   });
   return (
@@ -71,6 +76,15 @@ export default function App() {
           <span className="status-dot" />
           Demo Mode{' '}
           <span className="demo-detail">— deterministic test cases and synthetic demo media</span>
+        </div>
+      )}
+      {config.data?.aiMode === 'gemini' && config.data.freeTierOnly && (
+        <div className="demo-banner free-ai-banner" role="status" data-testid="free-ai-banner">
+          <span className="status-dot" aria-hidden="true" />
+          <strong>Free AI mode</strong>
+          <span className="demo-detail">
+            Daily provider quotas apply. CCTV is reconstructed from AI-generated frames.
+          </span>
         </div>
       )}
       <Routes>

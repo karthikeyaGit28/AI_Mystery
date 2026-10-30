@@ -1,267 +1,361 @@
-# Deploy AI Mystery Room on Render
+# Deploy using only free plans
 
-This walkthrough deploys the existing MERN project. React and Express share one
-public HTTPS address; a separate persistent worker generates cases and media.
-MongoDB Atlas stores records, Render Key Value stores BullMQ jobs, and a private
-Cloudflare R2 bucket stores generated images and video.
+The default deployment now uses **one Render Free web service** with external
+free databases/storage and free AI allocations. The previous paid Render worker,
+paid Render queue, and R2 setup are removed from this deployment.
 
-The configuration is in [render.yaml](render.yaml). It creates these services in
-Singapore:
+This code change does not cancel any cloud resources you may already have
+created. Review existing subscriptions separately; the new Blueprint creates
+only the one Free service described below.
 
-| Service      | Purpose                                         | Configured plan |
-| ------------ | ----------------------------------------------- | --------------- |
-| `amr-web`    | React website and Express API                   | `0.5c-512mb`    |
-| `amr-worker` | Gemini, ffmpeg, cleanup, and durable generation | `1c-2g`         |
-| `amr-queue`  | Private, persistent Redis-compatible job queue  | `256mb`         |
+| Component            | Free service                               | What it does                                       |
+| -------------------- | ------------------------------------------ | -------------------------------------------------- |
+| Website, API, worker | Render Free Docker web service             | Two supervised Node processes share one container  |
+| Case records         | Your existing MongoDB Atlas Free cluster   | Private canon, progress, guest sessions            |
+| Durable job queue    | Upstash Redis Free                         | BullMQ jobs and recovery after host restarts       |
+| Private files        | Supabase Free Storage                      | Photos, AI frames, thumbnails, MP4 recordings      |
+| Story and text clues | Gemini 3.8 Flash API free tier             | Canon, blind review, chats, documents              |
+| Generated images     | Cloudflare Workers AI Free, FLUX.1 Schnell | Two actual generated photos plus CCTV stills       |
+| CCTV                 | Local ffmpeg in the free container         | A playable 360p reconstruction from real AI frames |
 
-These are paid Render services. Review the estimate before confirming creation;
-MongoDB, R2, and Google may have their own usage charges. The worker's 2 GB plan
-is a starting allocation for media processing, not a measured guarantee. Plans
-can be adjusted after monitoring. See [Render compute plans](https://render.com/docs/compute-plans)
-and [persistent Key Value](https://render.com/docs/key-value).
+The four-suspect/eight-evidence game remains intact. To satisfy your newer
+free-only requirement, **Cloudflare replaces Gemini for image generation** and
+CCTV always uses the specified AI-frame fallback. This provider change is
+intentional; `spec.md` remains unchanged. These are real generated images, not
+Demo Mode fixtures.
 
-## 1. Put the project on GitHub
+## What “free” means here
 
-Use a private repository if you want to keep the source private. The running
-website still uses ordinary anonymous guest sessions.
+Use each provider's actual **Free** plan/account, not a paid plan with introductory
+credits. No automatic paid fallback is implemented. The code pins supported
+free AI models and blocks direct Gemini photo/video calls in free mode.
 
-From the project root in PowerShell:
+Account billing remains under your control: code cannot inspect or disable a
+provider's billing account. Use a Gemini API project **without paid billing** and
+Cloudflare **Workers Free**. Keep the Upstash account without a payment method:
+its current policy automatically converts free resources to pay-as-you-go when
+a payment method is added. See [Upstash's upgrade policy](https://upstash.com/docs/redis/howto/upgrade-database).
+
+Keep Render without a payment method as well: its Free resource overages can
+then suspend service rather than charge for extra usage. See [Render's Free limits](https://render.com/docs/free).
+
+Free quotas can stop generation or suspend a service. They do not provide an
+unlimited, always-on production SLA. This walkthrough does not require upgrading
+or entering payment details to bypass an exhausted quota.
+
+## Where to save the values
+
+Complete steps 1-5 first. As you collect credentials, save them privately in the
+root `.env` that is already open in your editor. Replace an existing setting
+rather than adding a second line with the same name. Do not replace your entire
+`.env` or share it in chat.
+
+In step 7, copy the nine collected values into Render's secret input fields.
+Your local `.env` is ignored by Git and excluded from the Docker image; it does
+not automatically become Render's environment. The Blueprint supplies the other
+production settings, including a generated session secret and public HTTPS URLs.
+
+## 1. Keep MongoDB Atlas Free
+
+Your existing active Free cluster is suitable; you do not need another cluster.
+
+1. In Atlas, select your `AI_Mystery` project and `Cluster0`.
+2. If you need the URI again, use **Connect / Get connection string**, then choose
+   the JavaScript / Node.js driver connection method.
+3. Replace `<db_password>` with the password for your **database user**, not the
+   password you use to log in to Atlas. URL-encode special characters in that
+   password before inserting it into the URI.
+4. Put `ai_mystery_room` immediately after the host's `/`, as shown below.
+5. Save the complete URI as `MONGODB_URI` in your local `.env`.
+
+```text
+mongodb+srv://<database-user>:<encoded-password>@<cluster-host>/ai_mystery_room?retryWrites=true&w=majority
+```
+
+If the database user does not exist, create one under **Database & Network
+Access**, in the database-user section, with read/write access to this
+application's database. The app creates its collections when it connects; you
+do not need to create them in Data Explorer.
+
+Network access is a separate step. After Render creates the service, add its
+outbound IP ranges in step 7. See [Atlas IP access lists](https://www.mongodb.com/docs/atlas/security/ip-access-list/).
+
+## 2. Create Supabase Free storage
+
+1. Open [Supabase](https://supabase.com/dashboard), sign in, and choose **New
+   project** in a **Free** organization. Name it `ai-mystery-storage` and choose
+   a nearby region. Supabase may ask for a database password while creating the
+   project; that password is not used by this app's storage client.
+2. Wait for the project to become ready, then open **Storage** and create a
+   bucket named **`ai-mystery-private`**.
+3. Keep **Public bucket OFF**. Default file-type and size settings are suitable.
+   If you set custom restrictions, permit JPEG, PNG, WebP and MP4 files and allow
+   files up to at least 20 MiB.
+4. Open [Storage S3 configuration](https://supabase.com/dashboard/project/_/storage/s3)
+   for this project. Generate an S3 **Access Key ID** and **Secret Access Key**.
+5. Copy the S3 endpoint and the exact project region displayed on that page:
+
+   ```text
+   https://<project-ref>.storage.supabase.co/storage/v1/s3
+   ```
+
+6. Save these four values in `.env`: `STORAGE_ENDPOINT`, `STORAGE_REGION`,
+   `STORAGE_ACCESS_KEY`, and `STORAGE_SECRET_KEY`. Keep
+   `STORAGE_BUCKET=ai-mystery-private` and `STORAGE_FORCE_PATH_STYLE=true`.
+
+Use the generated S3 pair, rather than the Supabase database password or an
+`anon`/`service_role` API key. The app still stores its case records in Atlas;
+Supabase supplies private file storage only. The S3 credentials stay on the
+server, and owner-checked API routes stream the files to players.
+
+Supabase Free currently includes 1 GB of files and limited egress; inactive
+projects may pause. S3 support is documented without a paid-plan restriction,
+but credential issuance has not been tested in your account. Sources:
+[Free plan](https://supabase.com/pricing), [S3 credentials](https://supabase.com/docs/guides/storage/s3/authentication),
+[S3 operations](https://supabase.com/docs/guides/storage/s3/compatibility).
+
+## 3. Create an Upstash Redis Free database
+
+1. Open [Upstash](https://console.upstash.com/), select **Redis**, and create a
+   database named `ai-mystery-queue` on the **Free** plan.
+2. Choose an available free region near the Render region if possible.
+3. Keep eviction disabled, so queued jobs are not silently evicted.
+4. Open the database's connection details. Copy its **Redis/TLS connection URL**,
+   which starts with `rediss://`. If the console shows a `redis-cli` command,
+   copy only the URL, without `redis-cli`, `--tls`, or surrounding shell syntax.
+   Do not use the HTTP REST URL or REST token:
+
+   ```text
+   rediss://default:<password>@<redis-host>:6379
+   ```
+
+5. Save that complete URL as `REDIS_URL` in `.env`.
+
+This becomes `REDIS_URL`. Do not add a payment method or upgrade the account for
+this free-only setup. The advertised free allocation is 250 MB and 500K commands
+per month. The app uses slower idle polling, but actual command usage still needs
+monitoring. Sources: [Free limits](https://upstash.com/pricing/redis),
+[BullMQ support](https://upstash.com/docs/redis/integrations/bullmq),
+[persistence](https://upstash.com/docs/redis/features/durability).
+
+## 4. Use Gemini's free text API
+
+1. Open [Google AI Studio's API Keys page](https://aistudio.google.com/apikey)
+   and sign in with your Google account.
+2. Select or create a project **without paid billing**. If you already have a
+   suitable restricted Gemini key in that project, you can keep using it.
+3. Otherwise choose **Create API key** for that project and copy the key.
+4. Save it as `GEMINI_API_KEY` in `.env`. Leave
+   `GEMINI_TEXT_MODEL=gemini-3.8-flash`.
+
+The configured text model currently has a free tier. Do not enable billing
+to bypass rate limits. Current key setup is documented in
+[Google's API key guide](https://ai.google.dev/gemini-api/docs/api-key).
+
+The app spaces text calls 15 seconds apart in the free profile. A complete case
+needs several calls, so generation can take minutes. Your account's actual
+request/token limits determine how many cases can be generated. Quota errors
+stop the case with a readable retry-after-reset message.
+
+Cold starts check SDK/configuration locally and defer AI network validation to
+case generation, so passive visits do not consume your free text allowance.
+
+Gemini's configured image and motion-video models have no API free tier, so
+the free profile never calls them. See [Google's API pricing](https://ai.google.dev/gemini-api/docs/pricing).
+
+## 5. Enable Cloudflare Workers AI Free
+
+This step is **Workers AI**, not R2 storage. No R2 subscription is needed.
+
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com/) and go to **Workers AI**.
+2. Keep the Workers plan **Free**.
+3. Select **Use REST API → Create a Workers AI API Token**.
+4. Use the provided token template, then copy the token and **Account ID**.
+5. Save them as `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in `.env`.
+   Account ID is a 32-character hexadecimal identifier. Use the account ID shown
+   by Workers AI, rather than a website's zone ID.
+
+The allowlisted model is `@cf/black-forest-labs/flux-1-schnell`. The app uses it for
+photos and two surveillance frames, then creates the labeled MP4 locally.
+Workers Free includes a daily allocation; requests fail at the limit unless you
+upgrade. This deployment does not upgrade or switch providers automatically.
+
+Official sources: [REST setup](https://developers.cloudflare.com/workers-ai/get-started/rest-api/),
+[FLUX model](https://developers.cloudflare.com/workers-ai/models/flux-1-schnell/),
+[Free quota](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+
+## 6. Check your settings and push the updated code
+
+Open a new PowerShell terminal at the project root and run:
 
 ```powershell
 cd "C:\Users\Dell\OneDrive\Desktop\NW\AI Mystery Room"
 $env:Path = (Resolve-Path ".\.tools\node-v22.23.4-win-x64").Path + ";" + $env:Path
+npm.cmd run configure:free
+```
 
+`configure:free` applies the free provider/model limits and adds missing
+Cloudflare key fields. It preserves your existing secret values, database/storage
+settings, and `AI_MODE`; it does not create provider accounts or fill credentials.
+
+Make sure the nine values from steps 1-5 are saved in `.env`, then run:
+
+```powershell
+npm.cmd run deployment:preflight
 npm.cmd run deployment:validate
-git status
+```
+
+Preflight reports setting names and fixed instructions without printing your
+secret values. It checks the formats used by this free deployment, including
+Atlas, Upstash TLS, Supabase S3, and Cloudflare's account ID. Fix every reported
+setting before continuing. It makes no network calls and spends no AI quota;
+a pass does not verify account plans, valid credentials, bucket privacy, or live
+connectivity. Local `AI_MODE=mock` is allowed because Render sets its own live
+mode automatically. Existing PowerShell environment variables take precedence
+over `.env`; use a new terminal to avoid old local-test overrides. A region or
+key that passes a format check still needs to match the provider's actual value.
+
+Use GitHub Free with paid Actions usage disabled. The workflow uses standard
+Linux runners, which are free for public repositories; private repositories have
+limited included compute/storage. Without a payment method, additional compute
+is blocked after the allowance is exhausted. If your account already enables
+paid usage, configure a zero-spend Actions budget with **Stop usage when budget
+limit is reached** before pushing. Keep the repository's current visibility.
+See [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+and [hard budgets](https://docs.github.com/en/billing/how-tos/set-up-budgets).
+
+After both checks pass, use the same PowerShell terminal:
+
+```powershell
 git ls-files .env
 ```
 
-The final command should print nothing. `.env`, downloaded tools, local database
-files, and `node_modules` are ignored. Keep real credentials in your local `.env`
-or Render's secret settings; do not paste them into tracked files.
-
-Commit the deployment changes and push to your repository's default branch:
+That command should print nothing. Then commit and push:
 
 ```powershell
 git add .
-git commit -m "Prepare production deployment on Render"
-git push
+git commit -m "Switch deployment to free service plans and AI providers"
+git push origin main
 ```
 
-If the repository is not connected to GitHub yet, create an empty GitHub repository,
-add its HTTPS URL as `origin`, then push your default branch. GitHub's repository
-page shows the exact commands. The included Actions workflow validates the code
-and builds the Linux Docker image after a push to `main` or `master`.
+Keep credentials in your local `.env` or provider secret settings. The Blueprint,
+container, and CI files are tracked; downloaded tools, test results, and `.env`
+are not. If `origin` is not configured, create an empty GitHub repository and
+follow GitHub's instructions to add it as the remote, then push this project's
+current branch. Do not change an existing remote merely because a push fails.
 
-## 2. Create MongoDB Atlas
+## 7. Create exactly one free Render service
 
-1. Create or open an Atlas project and cluster. Choose a region near the Render
-   services where your selected Atlas tier supports it.
-2. Under **Database Access**, create a **database user** for this application.
-   This is separate from your Atlas account login. Give it read/write access to
-   the `ai_mystery_room` database.
-3. Choose **Connect → Drivers → Node.js**, and copy the connection string.
-4. Set the database name to `ai_mystery_room`. Replace the user/password
-   placeholders with the database user's credentials. URL-encode special
-   characters in the password.
+1. Open [Render](https://dashboard.render.com/) and choose **New → Blueprint**.
+2. Select this GitHub repository and its `main` branch.
+3. Use the root `render.yaml` with the repository root as the Docker context.
+4. Confirm that the preview contains **only `amr-web`, plan Free**. It must not
+   contain a paid background worker, managed queue, database, or disk.
+5. Enter the requested values from your local `.env`. In Render's value fields,
+   paste only the actual value, without `KEY=`, example placeholders, or the
+   surrounding quotes you may have used in `.env`:
 
-Its shape is:
+   | Render setting          | Source                                 |
+   | ----------------------- | -------------------------------------- |
+   | `MONGODB_URI`           | Atlas Free connection string           |
+   | `REDIS_URL`             | Upstash Free Redis/TLS URL             |
+   | `GEMINI_API_KEY`        | Unbilled Gemini text API project       |
+   | `CLOUDFLARE_ACCOUNT_ID` | Workers AI account ID                  |
+   | `CLOUDFLARE_API_TOKEN`  | Workers AI REST token                  |
+   | `STORAGE_ENDPOINT`      | Supabase S3 endpoint                   |
+   | `STORAGE_REGION`        | Exact region from Supabase S3 settings |
+   | `STORAGE_ACCESS_KEY`    | Supabase S3 Access Key ID              |
+   | `STORAGE_SECRET_KEY`    | Supabase S3 Secret Access Key          |
 
-```text
-mongodb+srv://<db-user>:<encoded-password>@<cluster-host>/ai_mystery_room?retryWrites=true&w=majority
-```
+6. Create the Free service without adding paid resources. Session secret and
+   public URLs are wired automatically.
+7. Once the service appears, open the service's **Connect → Outbound** tab and
+   copy **all** its listed CIDR ranges, including their `/` suffixes.
+8. Return to Atlas: **Security → Database & Network Access → IP Access List**
+   (some dashboards label this **Network Access**). Choose **Add IP Address**,
+   paste one Render range, add a label such as `Render`, and confirm. Repeat for
+   every listed range and wait for the entries to become active.
+9. Return to Render. If the first deploy failed while the IP entries were being
+   added, choose **Manual Deploy → Deploy latest commit**.
 
-Save this privately for `MONGODB_URI`. You will add Render's outbound IP ranges
-in step 6, once the services exist. The official [Atlas/Render integration guide](https://www.mongodb.com/docs/atlas/reference/partner-integrations/render/)
-describes the network and connection setup.
+The local `.env`'s `NODE_ENV`, `PORT`, `WEB_ORIGIN`, `API_BASE_URL`, and
+`SESSION_SECRET` should not be copied into this Blueprint's secret fields. It
+already configures production values. You do not need Docker Desktop installed
+locally for Render to build the Dockerfile.
 
-## 3. Create private media storage in Cloudflare R2
+The worker is a second supervised process inside the same container. Both share
+the free host's CPU/memory, with one generation at a time. Redis/case data/media
+remain external, so host restarts can resume locked cases.
 
-1. Open **R2 Object Storage** in Cloudflare.
-2. Create a bucket named **`ai-mystery-private`**. This matches the Blueprint.
-3. Leave public access, `r2.dev`, and public custom-domain access disabled.
-4. Create R2 API credentials with **Object Read & Write** permissions restricted
-   to this bucket.
-5. Save the **Access Key ID**, **Secret Access Key**, and the account's S3 endpoint:
+Sources: [Render Free](https://render.com/docs/free),
+[outbound addresses](https://render.com/docs/outbound-ip-addresses).
 
-   ```text
-   https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-   ```
+## 8. Verify using the website and logs
 
-Use the S3 Access Key ID and Secret Access Key, rather than the general Cloudflare
-API token string. The Blueprint already sets `STORAGE_REGION=auto` and
-`STORAGE_FORCE_PATH_STYLE=true`. The browser requests media through the authenticated
-API, so this setup does not require exposing the bucket or configuring direct
-browser-to-bucket CORS.
+Render Free does **not** provide dashboard Shell/SSH or one-off jobs. Use its
+logs and the website:
 
-See Cloudflare's [S3 SDK settings](https://developers.cloudflare.com/r2/examples/aws/aws-sdk-js-v3/),
-[R2 credential instructions](https://developers.cloudflare.com/r2/api/tokens/), and
-[public-access settings](https://developers.cloudflare.com/r2/buckets/public-buckets/).
+1. Wait for GitHub's code/container checks and the Render deployment.
+2. Logs should show **AI Mystery Room API ready** and **Worker ready**.
+3. Open the assigned HTTPS `onrender.com` URL. The header should show **Free AI mode**.
+4. Open `/api/v1/health` and confirm `{"status":"ok"}`.
+5. Create one case. Inspect all eight artifacts, play the CCTV reconstruction,
+   refresh, use a hint, and submit an accusation.
+6. Check the provider dashboards for remaining free usage.
 
-## 4. Prepare Google Gemini access
+For an optional local provider check, configure your local `.env` with the same
+free-account credentials and run `npm run configure:free`, then set `AI_MODE=gemini`
+and run `npm run provider:check -w @amr/worker -- --full`. This consumes free quotas;
+do not run it repeatedly alongside the live worker.
 
-Create a Gemini API key for a Google project with the required model access and
-billing configuration. The deployment uses `AI_MODE=gemini`; production does not
-allow mock mode. The model IDs are environment settings, so change them if your
-account's available models differ from the specification's defaults.
+## If a deployment step fails
 
-Keep the key ready for Render's secret input. Do not add a `VITE_` prefix: it must
-stay on the API/worker side. Model capabilities are checked at worker startup and
-with the full smoke test in step 8. Check current availability in Google's
-[model documentation](https://ai.google.dev/gemini-api/docs/models) and your project.
+| Symptom                                                      | Next action                                                                                                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm.cmd` is not recognized                                  | Run the PowerShell `$env:Path` line in step 6 in that same terminal.                                                                        |
+| Preflight names a missing/invalid setting                    | Replace that one `.env` value using its provider dashboard; save and rerun preflight.                                                       |
+| `WORKER_DATABASE_UNAVAILABLE` / API database startup failure | Recheck the Atlas URI, encoded database password, and every Render outbound CIDR in Atlas.                                                  |
+| `WORKER_STORAGE_UNAVAILABLE`                                 | Check the Supabase project is active, bucket exists, endpoint ends in `/storage/v1/s3`, region matches, and keys are the generated S3 pair. |
+| Queue startup failure                                        | Recopy Upstash's `rediss://` URL, including its password; check the database is Free and within quota.                                      |
+| Case reports free AI quota exhausted                         | Wait for the provider's reset, then retry the saved case; keep paid billing disabled.                                                       |
+| Home page works but a case fails                             | Check both API and worker logs; the health URL alone does not test AI generation.                                                           |
+| First page load is slow                                      | Allow Render's Free service to wake, then retry the page.                                                                                   |
 
-## 5. Create the Render Blueprint
+## Free-service limits
 
-1. Sign in to [Render](https://dashboard.render.com/).
-2. Choose **New → Blueprint**.
-3. Connect your GitHub account and select this repository and its default branch.
-4. Use the root **`render.yaml`** file. Leave the project root at the repository
-   root; do not select `apps/api` as the build context.
-5. Enter the five requested settings:
+- Render sleeps after 15 minutes without inbound traffic and can take time to
+  wake. Keep the preparation page open during generation. Do not add artificial
+  keepalive pings to bypass free hosting restrictions.
+- Render's filesystem is ephemeral. Only temporary media uses local disk.
+- Atlas Free and Upstash Free have storage/connection/command limits. BullMQ
+  polling counts against Redis usage even when no new case is generated.
+- Supabase Free has a 1 GB file allocation and limited egress and may pause
+  inactive projects. Delete old cases when necessary; uploads fail safely at limits.
+- Google and Cloudflare enforce free AI quotas. If exhausted, wait for reset;
+  there is no automatic paid-model fallback.
+- Free hosting uses lower-memory **640×360 AI-frame CCTV**, one worker, 20 MiB
+  asset limits, and a default one new case per guest per day. Providers can limit
+  the entire app more tightly than this per-guest allowance.
+- Free-service availability and quotas can change. The application can enforce
+  selected providers/models, but cannot determine whether you upgraded a provider
+  account. Retain Free plans and unbilled API accounts to maintain zero charges.
 
-   | Render input         | Value                               |
-   | -------------------- | ----------------------------------- |
-   | `MONGODB_URI`        | Atlas connection string from step 2 |
-   | `GEMINI_API_KEY`     | Google API key from step 4          |
-   | `STORAGE_ENDPOINT`   | R2 HTTPS S3 endpoint from step 3    |
-   | `STORAGE_ACCESS_KEY` | R2 Access Key ID                    |
-   | `STORAGE_SECRET_KEY` | R2 Secret Access Key                |
+## What changed from the original specification
 
-6. Review the three service plans and estimated charges, then confirm creation
-   when the estimate is acceptable to you.
+Your newer free-only instruction takes priority over the previous paid setup.
+Gemini still creates the immutable canon and text evidence. Cloudflare creates
+genuine image evidence; the existing AI-frame fallback supplies video. API and
+worker remain separate processes but share one free container. No feature is
+represented as generated when it is a stock asset or fixture. Local `AI_MODE=mock`
+is still separately labeled Demo Mode.
 
-Render builds the Dockerfile and provides HTTPS. The Blueprint generates one
-session secret, connects both services to the same private queue, and shares the
-storage/database/provider settings with the worker. It derives the website and
-API origins from Render's assigned URL. No separate static-site service,
-frontend API URL, manually copied Redis URL, or local `.env` upload is needed.
+The original `spec.md` is retained unchanged. Cloud provisioning, account-tier
+verification, and real provider calls require your accounts; local tests do not
+prove your external credentials or deployed resource limits.
 
-The queue uses `noeviction`, journal/snapshot persistence, and internal-only
-network access. The worker stays running independently of HTTP requests. These
-settings follow Render's [Blueprint reference](https://render.com/docs/blueprint-spec)
-and [background-worker model](https://render.com/docs/background-workers).
-
-## 6. Allow Render to connect to Atlas
-
-As soon as the services appear in Render:
-
-1. Open `amr-web`, then **Connect → Outbound**.
-2. Copy its listed outbound IP ranges/CIDRs.
-3. In Atlas, open **Network Access**, and add those exact ranges.
-4. Check `amr-worker` the same way and add any additional ranges. Services in the
-   same Render region usually share the documented regional ranges.
-5. Wait until Atlas marks the entries active.
-
-Do this while the image builds if possible. If an initial deployment fails to
-connect to MongoDB, finish this step and use **Manual Deploy → Deploy latest
-commit** for both services. The configuration intentionally does not open Atlas
-to `0.0.0.0/0`. Render explains where to find the addresses in its
-[outbound-IP documentation](https://render.com/docs/outbound-ip-addresses).
-
-## 7. Confirm the services are running
-
-Wait for GitHub's `checks` and `container` jobs to pass and for Render's deployments
-to become live. With `autoDeployTrigger: checksPass`, future pushes wait for the
-repository's checks before automatically deploying.
-
-In Render logs:
-
-- `amr-web` should report **AI Mystery Room API ready**.
-- `amr-worker` should report **Worker ready** after its MongoDB, storage, queue,
-  and Gemini text checks succeed.
-- `amr-queue` should be available on the private network.
-
-Open the HTTPS address shown on `amr-web`, such as
-`https://amr-web-<assigned-suffix>.onrender.com`. That one address serves both the
-website and `/api/v1`.
-
-Open `/api/v1/health` on that address. It should return:
-
-```json
-{ "status": "ok" }
-```
-
-This is API liveness, not proof that paid image/video generation has succeeded.
-Complete the next step before treating the live game as verified.
-
-## 8. Verify production infrastructure and real generation
-
-Open the **Shell** for `amr-web` in Render and run from `/app`:
-
-```sh
-npm run deployment:runtime-check
-npm run infra:check
-npm run provider:check -w @amr/worker -- --full
-```
-
-The runtime check is offline. The infrastructure check connects to MongoDB,
-Redis, and the private bucket. The full provider smoke test makes paid Gemini
-requests to generate a case, text, two photos, and a video or AI-frame fallback.
-Its temporary artifacts are diagnostic; player cases are stored in MongoDB/R2.
-
-Then use the real website:
-
-1. Create a case from a new fictional premise.
-2. Wait for truthful generation stages to finish.
-3. Open both chats, both images, the playable CCTV reconstruction, and all three
-   documents.
-4. Bookmark/review evidence and refresh; the state should persist.
-5. Request a hint, submit an accusation, and read the fixed explanation.
-6. Open the case URL in an incognito browser; it should deny another guest access.
-7. Delete the case and confirm it becomes inaccessible.
-
-Local automated checks cannot replace this credential-dependent live test.
-
-## 9. Future changes and custom domains
-
-Commit and push application changes. CI and Render rebuild from the repository;
-do not upload `node_modules`, `.tools`, or a local database. The worker has a
-bounded shutdown and checkpoints, so an interrupted job can resume after BullMQ
-recovers its stalled lock.
-
-Change credentials through Render's environment settings. Worker values reference
-the web service: after changing a shared web value, **sync the Blueprint and
-redeploy both services**, or explicitly update the worker's matching value.
-References are resolved during sync rather than continuously following changes.
-
-For a custom domain, first add and verify it in the web service's domain settings.
-Then replace the web service's `WEB_ORIGIN` and `API_BASE_URL` entries in
-`render.yaml` with the final HTTPS origin:
-
-```yaml
-- key: WEB_ORIGIN
-  value: https://mystery.example.com
-- key: API_BASE_URL
-  value: https://mystery.example.com
-```
-
-Use the same origin for both, without `/api/v1` or a trailing path. Sync and
-redeploy so the worker inherits the new settings. Choose your final public host
-before inviting players, because anonymous guest cookies belong to that host.
-
-## Troubleshooting
-
-| Symptom                                         | Check                                                                                                           |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Docker build fails                              | Read GitHub's `container` job and Render build logs; use the repo root context and commit the updated lockfile. |
-| API exits before listening                      | Atlas credentials/allowlist and R2 endpoint, bucket, and object permissions.                                    |
-| `WORKER_CONFIGURATION_INVALID`                  | Production HTTPS origins, nonlocal session secret, `AI_MODE=gemini`, and required secret inputs.                |
-| `WORKER_DATABASE_UNAVAILABLE`                   | Atlas database user, URI password encoding, database name, and both services' outbound IP ranges.               |
-| `WORKER_STORAGE_UNAVAILABLE`                    | Pre-created private bucket, R2 Access Key ID/Secret Access Key, endpoint, and region `auto`.                    |
-| `WORKER_GEMINI_UNAVAILABLE`                     | Run the provider check; verify key, billing, quota, and configured model access.                                |
-| `WORKER_QUEUE_UNAVAILABLE` or cases stay queued | Worker deployment status and the automatically linked private Key Value connection.                             |
-| `ORIGIN_REJECTED` or missing guest session      | Public HTTPS host must match `WEB_ORIGIN` and `API_BASE_URL`; use the same host for website and media.          |
-| Media generation exceeds memory                 | Keep worker concurrency at 1, inspect worker memory metrics, and adjust the worker plan if needed.              |
-
-## What was verified during preparation
-
-On 2026-10-29, all **122 unit/integration tests** and **12 desktop/mobile
-production-hosting browser checks** passed. TypeScript checking, lint, formatting,
-the application builds, offline runtime checks, and the Render schema validator
-also passed. These browser tests exercised the actual built React app served by
-Express; they did not contact MongoDB or paid AI services.
-
-Docker is not installed on the preparation machine, so the Linux image build was
-not run locally. The included GitHub `container` job builds it and checks runtime
-packaging after you push. Actual cloud provisioning and the live Gemini smoke
-test require your accounts and are not claimed as completed by these local changes.
+Local verification on 2026-10-30: all 181 automated tests, including 25 offline
+deployment-input checks, passed. The 14 hosted
+desktop/mobile browser checks passed, along with formatting, lint, TypeScript,
+production builds, Blueprint validation, and offline runtime checks. Provider
+responses were mocked; the media tests ran real ffmpeg. Linux Docker execution
+still needs GitHub CI because Docker is unavailable in this workspace.

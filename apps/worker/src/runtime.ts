@@ -74,7 +74,13 @@ export async function startWorker(logger: Logger) {
     await ensureStorageBucket();
     if (stopping) return;
     stage = 'WORKER_GEMINI_UNAVAILABLE';
-    if (config.AI_MODE === 'gemini') await new GeminiAIProvider().checkCapability();
+    if (config.AI_MODE === 'gemini') {
+      const provider = new GeminiAIProvider();
+      provider.checkLocalCapability();
+      if (config.FREE_TIER_ONLY)
+        logger.info('Free AI capability is checked when a case is generated');
+      else await provider.checkCapability();
+    }
     if (stopping) return;
     stage = 'WORKER_QUEUE_UNAVAILABLE';
     const worker = new Worker<{ caseId: string }>(
@@ -101,12 +107,19 @@ export async function startWorker(logger: Logger) {
         concurrency: config.WORKER_CONCURRENCY,
         lockDuration: 120000,
         maxStalledCount: 2,
+        drainDelay: config.WORKER_DRAIN_DELAY_SECONDS,
+        stalledInterval: config.WORKER_STALLED_INTERVAL_MS,
       },
     );
     const cleanup = new Worker<{ caseId: string }>(
       'case-cleanup',
       (job) => track(() => cleanupCase(job.data.caseId)),
-      { connection: redisConnection, concurrency: 1 },
+      {
+        connection: redisConnection,
+        concurrency: 1,
+        drainDelay: config.WORKER_DRAIN_DELAY_SECONDS,
+        stalledInterval: config.WORKER_STALLED_INTERVAL_MS,
+      },
     );
     workers.push(worker, cleanup);
     worker.on('error', () =>

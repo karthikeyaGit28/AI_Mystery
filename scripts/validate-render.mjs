@@ -13,30 +13,49 @@ if (!validate(blueprint)) {
     console.error(`${issue.instancePath || '/'}: ${issue.message}`);
   process.exit(1);
 }
-const required = new Map([
-  ['amr-web', 'web'],
-  ['amr-worker', 'worker'],
-  ['amr-queue', 'keyvalue'],
-]);
 const services = blueprint.services;
-if (services.length !== required.size)
-  throw new Error('The deployment requires one web service, one worker, and one queue.');
-for (const [name, type] of required) {
-  if (services.filter((service) => service.name === name && service.type === type).length !== 1)
-    throw new Error(`Missing or duplicate deployment service: ${name}.`);
+if (services.length !== 1 || blueprint.databases?.length)
+  throw new Error(
+    'Free deployment allows only one free web service and no paid database resources.',
+  );
+const service = services[0];
+if (
+  service.type !== 'web' ||
+  service.name !== 'amr-web' ||
+  service.runtime !== 'docker' ||
+  service.plan !== 'free' ||
+  service.disk ||
+  service.scaling ||
+  (service.numInstances ?? 1) !== 1
+)
+  throw new Error(
+    'The app must use one explicitly free Docker web service, without paid disks or autoscaling.',
+  );
+if (service.dockerCommand !== 'node --max-old-space-size=48 scripts/start-combined.mjs')
+  throw new Error('The free host must supervise both API and worker inside its one container.');
+const variables = new Map((service.envVars ?? []).map((variable) => [variable.key, variable]));
+for (const [key, value] of Object.entries({
+  AI_MODE: 'gemini',
+  FREE_TIER_ONLY: 'true',
+  MEDIA_PROVIDER: 'cloudflare',
+  GEMINI_TEXT_MODEL: 'gemini-3.8-flash',
+  CLOUDFLARE_IMAGE_MODEL: '@cf/black-forest-labs/flux-1-schnell',
+  WORKER_CONCURRENCY: '1',
+  MAX_MEDIA_BYTES: '20971520',
+})) {
+  if (variables.get(key)?.value !== value)
+    throw new Error(`Missing or unsafe free-profile setting: ${key}.`);
 }
-const region = services[0].region;
 const privateKeys = new Set([
   'MONGODB_URI',
   'REDIS_URL',
   'GEMINI_API_KEY',
+  'CLOUDFLARE_API_TOKEN',
   'SESSION_SECRET',
   'STORAGE_ACCESS_KEY',
   'STORAGE_SECRET_KEY',
 ]);
 for (const service of services) {
-  if (service.region !== region)
-    throw new Error('Web, worker, and queue must share a Render region.');
   for (const variable of service.envVars ?? []) {
     if (privateKeys.has(variable.key) && Object.hasOwn(variable, 'value'))
       throw new Error(`Enter ${variable.key} in Render; do not commit a literal secret.`);
@@ -49,20 +68,8 @@ for (const service of services) {
     )
       throw new Error(`Invalid service reference for ${variable.key}.`);
   }
-  if (
-    service.type !== 'keyvalue' &&
-    !service.envVars.some((variable) => variable.key === 'AI_MODE' && variable.value === 'gemini')
-  )
-    throw new Error('Production services must use Gemini.');
 }
-const queue = services.find((service) => service.type === 'keyvalue');
-if (
-  queue.maxmemoryPolicy !== 'noeviction' ||
-  queue.persistenceMode !== 'journal-snapshot' ||
-  queue.ipAllowList.length !== 0
-)
-  throw new Error('The queue must be persistent, private, and use noeviction.');
 console.log(
-  'Render Blueprint matches the vendored official schema and application deployment rules.',
+  'Free-only Render Blueprint matches the official schema: one free web service, no paid resources, and free-provider guards.',
 );
 console.log('No cloud services were provisioned. Account-level validation happens in Render.');

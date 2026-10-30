@@ -86,6 +86,21 @@ test('compiled form rejects invalid lengths without any persistence request', as
   }
 });
 
+test('the live free profile is clearly labeled without presenting it as Demo Mode', async ({
+  page,
+}) => {
+  await page.route('**/api/v1/config', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ aiMode: 'gemini', freeTierOnly: true, mediaProvider: 'cloudflare' }),
+    }),
+  );
+  await page.goto('/');
+  await expect(page.getByTestId('free-ai-banner')).toBeVisible();
+  await expect(page.getByTestId('free-ai-banner')).toContainText('Free AI mode');
+  await expect(page.getByText('Demo Mode', { exact: false })).toHaveCount(0);
+});
+
 test('same-origin health and unknown API remain JSON under the SPA host', async ({ page }) => {
   await page.goto('/');
   const health = await page.evaluate(async () => {

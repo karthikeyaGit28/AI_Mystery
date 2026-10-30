@@ -74,3 +74,79 @@ describe('production environment', () => {
     expect(() => parseEnvironment({ NODE_ENV: 'test', TRUST_PROXY_HOPS: value })).toThrow();
   });
 });
+
+describe('free-tier-only generation configuration', () => {
+  const freeLive = {
+    ...production,
+    WEB_ORIGIN: 'https://mystery.example.onrender.com',
+    FREE_TIER_ONLY: 'true',
+    MEDIA_PROVIDER: 'cloudflare',
+    CLOUDFLARE_ACCOUNT_ID: 'test-account',
+    CLOUDFLARE_API_TOKEN: 'test-token-never-sent',
+  };
+  it('preserves standard defaults outside the free profile', () => {
+    const result = parseEnvironment({ NODE_ENV: 'test' });
+    expect(result.FREE_TIER_ONLY).toBe(false);
+    expect(result.MEDIA_PROVIDER).toBe('gemini');
+    expect(result.GEMINI_TEXT_MIN_INTERVAL_MS).toBe(0);
+    expect(result.WORKER_DRAIN_DELAY_SECONDS).toBe(5);
+    expect(result.WORKER_STALLED_INTERVAL_MS).toBe(30000);
+    expect(result.MAX_MEDIA_BYTES).toBe(50 * 1024 * 1024);
+  });
+  it('uses real free providers with slower queue polling and a smaller media cap', () => {
+    const result = parseEnvironment(freeLive);
+    expect(result.FREE_TIER_ONLY).toBe(true);
+    expect(result.AI_MODE).toBe('gemini');
+    expect(result.MEDIA_PROVIDER).toBe('cloudflare');
+    expect(result.CLOUDFLARE_IMAGE_MODEL).toBe('@cf/black-forest-labs/flux-1-schnell');
+    expect(result.GEMINI_TEXT_MODEL).toBe('gemini-3.8-flash');
+    expect(result.GEMINI_TEXT_MIN_INTERVAL_MS).toBe(15000);
+    expect(result.WORKER_DRAIN_DELAY_SECONDS).toBe(60);
+    expect(result.WORKER_STALLED_INTERVAL_MS).toBe(120000);
+    expect(result.WORKER_CONCURRENCY).toBe(1);
+    expect(result.MAX_MEDIA_BYTES).toBe(20 * 1024 * 1024);
+  });
+  it('honors explicit conservative timing and lower media limits', () => {
+    const result = parseEnvironment({
+      ...freeLive,
+      GEMINI_TEXT_MIN_INTERVAL_MS: '20000',
+      WORKER_DRAIN_DELAY_SECONDS: '120',
+      WORKER_STALLED_INTERVAL_MS: '180000',
+      MAX_MEDIA_BYTES: String(10 * 1024 * 1024),
+    });
+    expect(result.GEMINI_TEXT_MIN_INTERVAL_MS).toBe(20000);
+    expect(result.WORKER_DRAIN_DELAY_SECONDS).toBe(120);
+    expect(result.WORKER_STALLED_INTERVAL_MS).toBe(180000);
+    expect(result.MAX_MEDIA_BYTES).toBe(10 * 1024 * 1024);
+  });
+  it.each([
+    { MEDIA_PROVIDER: 'gemini' },
+    { GEMINI_TEXT_MODEL: 'gemini-pro-paid' },
+    { CLOUDFLARE_IMAGE_MODEL: '@cf/paid-image-model' },
+    { WORKER_CONCURRENCY: '2' },
+    { MAX_MEDIA_BYTES: String(20 * 1024 * 1024 + 1) },
+  ])('fails closed on paid model choices or unsafe free-profile limits: %j', (override) => {
+    expect(() => parseEnvironment({ ...freeLive, ...override })).toThrow(/FREE_TIER_ONLY/);
+  });
+  it.each(['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN'])(
+    'requires %s for real free generation',
+    (name) => {
+      expect(() => parseEnvironment({ ...freeLive, [name]: '' })).toThrow(
+        /CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN/,
+      );
+    },
+  );
+  it('still allows credential-free local mock tests with the free profile', () => {
+    const result = parseEnvironment({
+      NODE_ENV: 'test',
+      AI_MODE: 'mock',
+      FREE_TIER_ONLY: 'true',
+      MEDIA_PROVIDER: 'cloudflare',
+    });
+    expect(result.AI_MODE).toBe('mock');
+    expect(result.CLOUDFLARE_API_TOKEN).toBe('');
+    expect(() => parseEnvironment({ ...freeLive, AI_MODE: 'mock' })).toThrow(
+      /Production requires Gemini/,
+    );
+  });
+});

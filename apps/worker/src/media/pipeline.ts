@@ -13,6 +13,29 @@ import {
   type MysteryAIProvider,
 } from '../ai/contracts.js';
 
+if (config.FREE_TIER_ONLY) {
+  sharp.concurrency(1);
+  sharp.cache({ memory: 16, files: 0, items: 32 });
+}
+export function mediaDimensions() {
+  return config.FREE_TIER_ONLY ? { width: 640, height: 360 } : { width: 1280, height: 720 };
+}
+export function mediaProcessArguments(binary: string, args: string[]) {
+  if (!config.FREE_TIER_ONLY || binary !== ffmpegPath() || args.length === 0) return args;
+  return [
+    '-threads',
+    '1',
+    '-filter_threads',
+    '1',
+    '-filter_complex_threads',
+    '1',
+    ...args.slice(0, -1),
+    '-threads',
+    '1',
+    args[args.length - 1]!,
+  ];
+}
+
 const escapeXml = (s: string) =>
   s.replace(
     /[&<>"']/g,
@@ -33,7 +56,10 @@ export async function runProcess(
   timeout = 120000,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(binary, mediaProcessArguments(binary, args), {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -78,7 +104,12 @@ export async function normalizedPhoto(media: GeneratedMedia) {
     throw new GenerationError('INVALID_IMAGE', 'The generated image is too small.');
   const data = await sharp(media.data, { limitInputPixels: 40_000_000 })
     .rotate()
-    .resize({ width: 1920, height: 1920, fit: 'inside', withoutEnlargement: true })
+    .resize({
+      width: config.FREE_TIER_ONLY ? 1024 : 1920,
+      height: config.FREE_TIER_ONLY ? 1024 : 1920,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
     .webp({ quality: 87 })
     .toBuffer();
   const dimensions = await sharp(data).metadata();
@@ -144,7 +175,10 @@ export class MediaPipeline {
         'INVALID_FRAME_COUNT',
         'CCTV needs two or three AI-generated frames.',
       );
-    if (this.provider.mode === 'gemini' && frames.some((frame) => frame.method !== 'GEMINI_IMAGE'))
+    if (
+      this.provider.mode === 'gemini' &&
+      frames.some((frame) => !['GEMINI_IMAGE', 'CLOUDFLARE_IMAGE'].includes(frame.method))
+    )
       throw new GenerationError(
         'NON_AI_FALLBACK',
         'Live fallback requires genuine AI frames.',
@@ -159,6 +193,10 @@ export class MediaPipeline {
     return frames;
   }
   private overlay(input: LockedVisualInput, fallback: boolean) {
+    const { width, height } = mediaDimensions();
+    const top = config.FREE_TIER_ONLY ? 48 : 66;
+    const bottom = config.FREE_TIER_ONLY ? 42 : 60;
+    const padding = config.FREE_TIER_ONLY ? 12 : 24;
     const time = new Intl.DateTimeFormat('en-GB', {
       timeZone: input.blueprint.timezone,
       year: 'numeric',
@@ -176,7 +214,7 @@ export class MediaPipeline {
           ? 'AI-FRAME SURVEILLANCE RECONSTRUCTION'
           : 'AI-GENERATED FICTIONAL RECONSTRUCTION';
     return Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect x="0" y="0" width="1280" height="66" fill="#080c12" fill-opacity=".92"/><text x="24" y="42" fill="#eef2f7" font-family="sans-serif" font-size="24">${escapeXml(input.plan.cameraLabel!)} · EVENT ${escapeXml(time)} · ${escapeXml(input.blueprint.timezone)}</text><rect x="0" y="660" width="1280" height="60" fill="#080c12" fill-opacity=".92"/><text x="24" y="698" fill="#d9a74d" font-family="sans-serif" font-size="20">${escapeXml(label)}</text></svg>`,
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect x="0" y="0" width="${width}" height="${top}" fill="#080c12" fill-opacity=".92"/><text x="${padding}" y="${config.FREE_TIER_ONLY ? 30 : 42}" fill="#eef2f7" font-family="sans-serif" font-size="${config.FREE_TIER_ONLY ? 15 : 24}">${escapeXml(input.plan.cameraLabel!)} · EVENT ${escapeXml(time)} · ${escapeXml(input.blueprint.timezone)}</text><rect x="0" y="${height - bottom}" width="${width}" height="${bottom}" fill="#080c12" fill-opacity=".92"/><text x="${padding}" y="${height - (config.FREE_TIER_ONLY ? 16 : 22)}" fill="#d9a74d" font-family="sans-serif" font-size="${config.FREE_TIER_ONLY ? 12 : 20}">${escapeXml(label)}</text></svg>`,
     );
   }
   private async compile(
@@ -185,6 +223,7 @@ export class MediaPipeline {
     frames: GeneratedMedia[],
   ): Promise<BuiltCctv> {
     const directory = await mkdtemp(join(tmpdir(), 'amr-media-'));
+    const { width, height } = mediaDimensions();
     try {
       const output = join(directory, 'output.mp4');
       const posterPath = join(directory, 'poster.webp');
@@ -203,7 +242,7 @@ export class MediaPipeline {
           '-i',
           overlay,
           '-filter_complex',
-          '[0:v]scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720[base];[base][1:v]overlay=0:0:shortest=1,format=yuv420p[v]',
+          `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[base];[base][1:v]overlay=0:0:shortest=1,format=yuv420p[v]`,
           '-map',
           '[v]',
           '-an',
@@ -226,7 +265,7 @@ export class MediaPipeline {
         for (let index = 0; index < frames.length; index++) {
           const path = join(directory, `frame-${index}.png`);
           const image = await sharp(frames[index]!.data)
-            .resize(1280, 720, { fit: 'cover' })
+            .resize(width, height, { fit: 'cover' })
             .composite([{ input: this.overlay(input, true) }])
             .png()
             .toBuffer();
@@ -236,7 +275,7 @@ export class MediaPipeline {
         const args = sources.flatMap((source) => ['-i', source]);
         const zoomFilters = sources.map(
           (_, index) =>
-            `[${index}:v]zoompan=z='min(zoom+0.0004,1.025)':d=75:s=1280x720:fps=25,setpts=PTS-STARTPTS[v${index}]`,
+            `[${index}:v]zoompan=z='min(zoom+0.0004,1.025)':d=75:s=${width}x${height}:fps=25,setpts=PTS-STARTPTS[v${index}]`,
         );
         const concat = `${sources.map((_, index) => `[v${index}]`).join('')}concat=n=${sources.length}:v=1:a=0,format=yuv420p[v]`;
         await runProcess(ffmpegPath(), [

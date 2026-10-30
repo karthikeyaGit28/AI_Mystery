@@ -22,10 +22,15 @@ import {
 } from '../ai/contracts.js';
 import { GeminiAIProvider } from '../ai/gemini.js';
 import { MockAIProvider } from '../ai/mock.js';
+import { CloudflareImageProvider, CloudflareMediaProvider } from '../ai/cloudflare.js';
 import { extractPoster, MediaPipeline, normalizedPhoto } from '../media/pipeline.js';
 
 export function createProvider(): MysteryAIProvider {
-  return config.AI_MODE === 'gemini' ? new GeminiAIProvider() : new MockAIProvider();
+  if (config.AI_MODE === 'mock') return new MockAIProvider();
+  const text = new GeminiAIProvider();
+  return config.MEDIA_PROVIDER === 'cloudflare'
+    ? new CloudflareMediaProvider(text, new CloudflareImageProvider())
+    : text;
 }
 export function safeGenerationCode(error: unknown) {
   return error instanceof GenerationError ? error.code : 'GENERATION_FAILED';
@@ -151,7 +156,13 @@ async function saveAsset(input: AssetInput) {
   await assertActive(input.caseId);
   const id = randomUUID();
   const extension =
-    input.mimeType === 'video/mp4' ? 'mp4' : input.mimeType === 'image/png' ? 'png' : 'webp';
+    input.mimeType === 'video/mp4'
+      ? 'mp4'
+      : input.mimeType === 'image/png'
+        ? 'png'
+        : input.mimeType === 'image/jpeg'
+          ? 'jpg'
+          : 'webp';
   const objectKey = `cases/${input.caseId}/${id}.${extension}`;
   if (input.data.length > config.MAX_MEDIA_BYTES)
     throw new GenerationError(
@@ -420,7 +431,11 @@ export async function generateCase(caseId: string, provider: MysteryAIProvider =
           );
         }
       },
-      provider.mode === 'mock' ? 'mock-v1' : config.GEMINI_IMAGE_MODEL,
+      provider.mode === 'mock'
+        ? 'mock-v1'
+        : config.MEDIA_PROVIDER === 'cloudflare'
+          ? config.CLOUDFLARE_IMAGE_MODEL
+          : config.GEMINI_IMAGE_MODEL,
     );
 
     await runStage(
@@ -500,7 +515,11 @@ export async function generateCase(caseId: string, provider: MysteryAIProvider =
           }),
         );
       },
-      provider.mode === 'mock' ? 'mock-v1' : config.GEMINI_VIDEO_MODEL,
+      provider.mode === 'mock'
+        ? 'mock-v1'
+        : config.MEDIA_PROVIDER === 'cloudflare'
+          ? 'ffmpeg-ai-frame'
+          : config.GEMINI_VIDEO_MODEL,
     );
 
     await runStage(

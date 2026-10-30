@@ -39,7 +39,7 @@ export const EvidencePlanSchema = z
       .min(1)
       .max(20),
     authoredObservation: text,
-    renderBrief: text,
+    renderBrief: text.max(1200),
     chatParticipants: z.array(text.max(100)).min(2).max(4).optional(),
     documentKind: z.enum(['INCIDENT_REPORT', 'WITNESS', 'ACCESS_LOG']).optional(),
     cameraLabel: text.max(40).optional(),
@@ -85,7 +85,7 @@ export type LockedVisualInput = LockedEvidenceInput & { frameIndex?: number };
 export type GeneratedMedia = {
   data: Buffer;
   mimeType: string;
-  method: 'MOCK' | 'GEMINI_IMAGE' | 'GEMINI_OMNI_VIDEO' | 'AI_FRAME_VIDEO';
+  method: 'MOCK' | 'GEMINI_IMAGE' | 'CLOUDFLARE_IMAGE' | 'GEMINI_OMNI_VIDEO' | 'AI_FRAME_VIDEO';
 };
 export type PublicReviewInput = Pick<
   PrivateBlueprint,

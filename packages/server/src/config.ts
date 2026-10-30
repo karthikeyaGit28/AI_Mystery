@@ -53,8 +53,17 @@ export const EnvironmentSchema = z.object({
   SESSION_COOKIE_NAME: z.string().default('amr_guest'),
   SESSION_SECRET: z.string().min(32).default('local-development-only-change-this-secret-32'),
   AI_MODE: z.enum(['mock', 'gemini']).default('mock'),
+  FREE_TIER_ONLY: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  MEDIA_PROVIDER: z.enum(['gemini', 'cloudflare']).default('gemini'),
+  CLOUDFLARE_ACCOUNT_ID: z.string().trim().default(''),
+  CLOUDFLARE_API_TOKEN: z.string().trim().default(''),
+  CLOUDFLARE_IMAGE_MODEL: z.string().trim().default('@cf/black-forest-labs/flux-1-schnell'),
   GEMINI_API_KEY: z.string().default(''),
   GEMINI_TEXT_MODEL: z.string().default('gemini-3.8-flash'),
+  GEMINI_TEXT_MIN_INTERVAL_MS: z.coerce.number().int().nonnegative().default(0),
   GEMINI_IMAGE_MODEL: z.string().default('gemini-nano-banana-2.1'),
   GEMINI_VIDEO_MODEL: z.string().default('gemini-omni-1.1-flash'),
   STORAGE_ENDPOINT: z.url().default('http://localhost:9000'),
@@ -73,16 +82,27 @@ export const EnvironmentSchema = z.object({
   GENERATION_WATCHDOG_MINUTES: number(20),
   CASE_RETENTION_DAYS: number(30),
   WORKER_CONCURRENCY: number(1),
+  WORKER_DRAIN_DELAY_SECONDS: number(5),
+  WORKER_STALLED_INTERVAL_MS: number(30000),
   MAX_MEDIA_BYTES: number(50 * 1024 * 1024),
 });
 export function parseEnvironment(source: Record<string, unknown>) {
   const production = source.NODE_ENV === 'production';
+  const freeOnly = source.FREE_TIER_ONLY === 'true';
   const webOrigin = source.WEB_ORIGIN || source.RENDER_EXTERNAL_URL;
   const apiOrigin = source.API_BASE_URL || source.WEB_ORIGIN || source.RENDER_EXTERNAL_URL;
   if (production && (!webOrigin || !apiOrigin))
     throw new Error('Production requires public WEB_ORIGIN/API_BASE_URL or RENDER_EXTERNAL_URL.');
   const result = EnvironmentSchema.parse({
     ...source,
+    ...(freeOnly
+      ? {
+          GEMINI_TEXT_MIN_INTERVAL_MS: source.GEMINI_TEXT_MIN_INTERVAL_MS ?? 15000,
+          WORKER_DRAIN_DELAY_SECONDS: source.WORKER_DRAIN_DELAY_SECONDS ?? 60,
+          WORKER_STALLED_INTERVAL_MS: source.WORKER_STALLED_INTERVAL_MS ?? 120000,
+          MAX_MEDIA_BYTES: source.MAX_MEDIA_BYTES ?? 20 * 1024 * 1024,
+        }
+      : {}),
     ...(production ? { WEB_ORIGIN: webOrigin, API_BASE_URL: apiOrigin } : {}),
   });
   if (production) {
@@ -98,6 +118,29 @@ export function parseEnvironment(source: Record<string, unknown>) {
       throw new Error(
         'SERVE_WEB requires WEB_ORIGIN and API_BASE_URL to use the same public origin.',
       );
+  }
+  if (result.FREE_TIER_ONLY) {
+    if (result.MEDIA_PROVIDER !== 'cloudflare')
+      throw new Error(
+        'FREE_TIER_ONLY requires MEDIA_PROVIDER=cloudflare; paid Gemini image/video generation is disabled.',
+      );
+    if (result.GEMINI_TEXT_MODEL !== 'gemini-3.8-flash')
+      throw new Error('FREE_TIER_ONLY permits only the verified free text model gemini-3.8-flash.');
+    if (result.CLOUDFLARE_IMAGE_MODEL !== '@cf/black-forest-labs/flux-1-schnell')
+      throw new Error(
+        'FREE_TIER_ONLY permits only the free Cloudflare FLUX.1 Schnell image model.',
+      );
+    if (
+      result.AI_MODE === 'gemini' &&
+      (!result.CLOUDFLARE_ACCOUNT_ID || !result.CLOUDFLARE_API_TOKEN)
+    )
+      throw new Error(
+        'FREE_TIER_ONLY live generation requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN. Use accounts without paid billing enabled.',
+      );
+    if (result.WORKER_CONCURRENCY !== 1)
+      throw new Error('FREE_TIER_ONLY requires WORKER_CONCURRENCY=1.');
+    if (result.MAX_MEDIA_BYTES > 20 * 1024 * 1024)
+      throw new Error('FREE_TIER_ONLY requires MAX_MEDIA_BYTES at most 20971520 (20 MiB).');
   }
   return result;
 }

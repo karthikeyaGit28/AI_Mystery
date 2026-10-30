@@ -250,6 +250,16 @@ nav {
   min-height: 29px;
   padding: 6px 16px;
 }
+.free-ai-banner {
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 3px;
+  text-align: center;
+}
+.free-ai-banner > strong {
+  font-weight: 600;
+  white-space: nowrap;
+}
 .status-dot,
 .recording-dot {
   height: 5px;

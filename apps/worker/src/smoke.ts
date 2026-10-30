@@ -4,14 +4,14 @@ import { config } from '@amr/server';
 import { publicReviewInput, validateBlueprint } from './ai/contracts.js';
 import { GeminiAIProvider } from './ai/gemini.js';
 import { MediaPipeline, normalizedPhoto } from './media/pipeline.js';
-import { renderTextEvidence } from './pipeline/generate.js';
+import { createProvider, renderTextEvidence } from './pipeline/generate.js';
 
 if (config.AI_MODE !== 'gemini')
   throw new Error(
     'Provider checks require AI_MODE=gemini and a valid GEMINI_API_KEY. Demo mode is not a live capability check.',
   );
-const provider = new GeminiAIProvider();
-await provider.checkCapability();
+await new GeminiAIProvider().checkCapability();
+const provider = createProvider();
 console.log('Gemini text and Interactions API capability verified.');
 if (process.argv.includes('--full')) {
   const blueprint = validateBlueprint(
@@ -54,5 +54,5 @@ if (process.argv.includes('--full')) {
   );
 } else
   console.log(
-    'Run npm run provider:check --workspace @amr/worker -- --full to test paid case, photo and video/fallback generation.',
+    'Run npm run provider:check --workspace @amr/worker -- --full to test the configured case, photo and video/fallback providers within their quotas.',
   );

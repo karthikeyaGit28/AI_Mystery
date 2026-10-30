@@ -22,6 +22,10 @@ export function scoreAccusation(
 export function hashValue(value: string) {
   return createHash('sha256').update(value).digest('hex');
 }
+export function publicGenerationFailure(status: string, failureCode?: string) {
+  if (status !== 'FAILED') return null;
+  return failureCode === 'FREE_AI_QUOTA_EXCEEDED' ? 'FREE_AI_QUOTA_EXCEEDED' : 'GENERATION_FAILED';
+}
 export function normalizeByteRange(range: string | undefined, bytes: number) {
   if (!range) return undefined;
   const invalid = () =>

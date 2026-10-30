@@ -3,7 +3,7 @@ import { safeStartupCode } from './lifecycle.js';
 
 const logger = pino({
   name: 'amr-worker',
-  redact: ['key', 'apiKey', 'GEMINI_API_KEY', 'prompt', 'blueprint'],
+  redact: ['key', 'apiKey', 'GEMINI_API_KEY', 'CLOUDFLARE_API_TOKEN', 'prompt', 'blueprint'],
 });
 try {
   // Configuration parsing is inside the guarded import, so invalid environment

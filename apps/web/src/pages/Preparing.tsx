@@ -30,6 +30,7 @@ export default function Preparing() {
   useEffect(() => {
     if (status.data?.status === 'READY') navigate(`/cases/${id}/investigate`, { replace: true });
   }, [status.data?.status, id, navigate]);
+  const quotaExceeded = status.data?.errorCode === 'FREE_AI_QUOTA_EXCEEDED';
   const index =
     status.data?.status === 'READY'
       ? stages.length
@@ -44,14 +45,18 @@ export default function Preparing() {
       </div>
       <p className="eyebrow">A NEW MYSTERY IS TAKING SHAPE</p>
       <h1>
-        {status.data?.status === 'FAILED'
-          ? 'A lead needs a second look.'
-          : 'Every detail has a purpose.'}
+        {quotaExceeded
+          ? 'The free AI quota is used for now.'
+          : status.data?.status === 'FAILED'
+            ? 'A lead needs a second look.'
+            : 'Every detail has a purpose.'}
       </h1>
       <p className="preparing-description">
-        {status.data?.status === 'FAILED'
-          ? 'The case could not be completed. Your saved progress and locked story will be reused when you retry.'
-          : 'We’re building a coherent case, then creating every piece of evidence. The truth is being sealed before your investigation begins.'}
+        {quotaExceeded
+          ? 'The provider’s free allowance has been used. Your case is saved. Retry after the provider’s quota resets; retrying immediately will not restore the allowance.'
+          : status.data?.status === 'FAILED'
+            ? 'The case could not be completed. Your saved progress and locked story will be reused when you retry.'
+            : 'We’re building a coherent case, then creating every piece of evidence. The truth is being sealed before your investigation begins.'}
       </p>
       {status.isError ? (
         <ErrorState error={status.error} retry={() => void status.refetch()} />
@@ -64,9 +69,11 @@ export default function Preparing() {
               <LoaderCircle className="spin" size={18} />
             )}
             <span>
-              {status.data?.status === 'FAILED'
-                ? 'Generation paused'
-                : status.data?.stageLabel || 'Connecting to the case room…'}
+              {quotaExceeded
+                ? status.data?.stageLabel || 'Waiting for the free AI quota to reset'
+                : status.data?.status === 'FAILED'
+                  ? 'Generation paused'
+                  : status.data?.stageLabel || 'Connecting to the case room…'}
             </span>
           </div>
           <ol className="stage-list">
@@ -92,10 +99,18 @@ export default function Preparing() {
                   onClick={() => retry.mutate()}
                 >
                   <RefreshCw size={16} />
-                  {retry.isPending ? 'Requesting retry…' : 'Retry generation'}
+                  {retry.isPending
+                    ? 'Requesting retry…'
+                    : quotaExceeded
+                      ? 'Retry after quota reset'
+                      : 'Retry generation'}
                 </button>
               ) : (
-                <p>The retry limit has been reached. Please start a new case.</p>
+                <p>
+                  {quotaExceeded
+                    ? 'This case has no retries left. Wait for the provider’s quota to reset before starting a new case.'
+                    : 'The retry limit has been reached. Please start a new case.'}
+                </p>
               )}
               {retry.isError && <ErrorState error={retry.error} />}
             </div>
@@ -105,7 +120,9 @@ export default function Preparing() {
       <p className="preparing-note">
         You can close this page. Your case will be waiting in Case files.
         <br />
-        Preparation time depends on the AI provider. This page refreshes automatically.
+        {status.data?.status === 'FAILED'
+          ? 'Return to this page when you are ready to retry.'
+          : 'Preparation time depends on the AI provider. This page refreshes automatically.'}
       </p>
       <Link to="/history" className="text-button">
         <ArrowLeft size={15} />

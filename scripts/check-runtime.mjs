@@ -11,6 +11,8 @@ const files = [
   'apps/web/dist/index.html',
   'apps/api/src/server.ts',
   'apps/worker/src/worker.ts',
+  'apps/worker/src/ai/cloudflare.ts',
+  'scripts/start-combined.mjs',
   'packages/server/src/index.ts',
   'packages/shared/src/index.ts',
   ...[

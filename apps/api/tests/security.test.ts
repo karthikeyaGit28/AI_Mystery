@@ -227,7 +227,26 @@ beforeEach(() => {
 describe('HTTP security boundaries', () => {
   it('offers minimal liveness and clearly distinguishes mock mode', async () => {
     expect((await request(app).get('/api/v1/health')).body).toEqual({ status: 'ok' });
-    expect((await request(app).get('/api/v1/config')).body).toEqual({ aiMode: 'mock' });
+    expect((await request(app).get('/api/v1/config')).body).toEqual({
+      aiMode: 'mock',
+      freeTierOnly: false,
+      mediaProvider: 'gemini',
+    });
+  });
+  it('reports exhausted free AI quota without leaking internal provider errors', async () => {
+    state.record.status = 'FAILED';
+    state.record.manualRetries = 0;
+    state.record.failureCode = 'FREE_AI_QUOTA_EXCEEDED';
+    state.record.providerError = 'private provider payload with credential-like data';
+    const response = await request(app).get(`${base}/status`).set('Cookie', cookie);
+    expect(response.status).toBe(200);
+    expect(response.body.errorCode).toBe('FREE_AI_QUOTA_EXCEEDED');
+    expect(response.body.stageLabel).toMatch(/free AI quota/i);
+    expect(JSON.stringify(response.body)).not.toContain('private provider payload');
+    state.record.failureCode = 'UNRECOGNIZED_PRIVATE_PROVIDER_MESSAGE';
+    expect((await request(app).get(`${base}/status`).set('Cookie', cookie)).body.errorCode).toBe(
+      'GENERATION_FAILED',
+    );
   });
   it('rejects untrusted and absent origins before state-changing handlers', async () => {
     for (const origin of [undefined, 'https://attacker.example']) {

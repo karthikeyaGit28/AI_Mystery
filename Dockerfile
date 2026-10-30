@@ -29,6 +29,13 @@ ENV NODE_ENV=production \
     WEB_DIST_PATH=apps/web/dist \
     FFMPEG_PATH=/usr/bin/ffmpeg \
     FFPROBE_PATH=/usr/bin/ffprobe
+ENV FREE_TIER_ONLY=true \
+    MEDIA_PROVIDER=cloudflare \
+    GEMINI_TEXT_MIN_INTERVAL_MS=15000 \
+    WORKER_DRAIN_DELAY_SECONDS=60 \
+    WORKER_STALLED_INTERVAL_MS=120000 \
+    WORKER_CONCURRENCY=1 \
+    MAX_MEDIA_BYTES=20971520
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/tsconfig.base.json ./tsconfig.base.json
@@ -47,10 +54,10 @@ COPY --from=build /app/packages/server/src ./packages/server/src
 COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json
 COPY --from=build /app/packages/shared/tsconfig.json ./packages/shared/tsconfig.json
 COPY --from=build /app/packages/shared/src ./packages/shared/src
-COPY scripts/check-runtime.mjs scripts/check-infrastructure.ts ./scripts/
+COPY scripts/check-runtime.mjs scripts/check-infrastructure.ts scripts/start-combined.mjs ./scripts/
 RUN mkdir -p /app/apps/worker/.artifacts && chown node:node /app/apps/worker/.artifacts
 
 USER node
 EXPOSE 10000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "--import", "tsx", "apps/api/src/server.ts"]
+CMD ["node", "--max-old-space-size=48", "scripts/start-combined.mjs"]

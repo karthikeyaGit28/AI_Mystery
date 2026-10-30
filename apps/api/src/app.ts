@@ -34,6 +34,7 @@ import {
   assertSafePremise,
   stageLabels,
   normalizeByteRange,
+  publicGenerationFailure,
 } from './domain.js';
 import { configureProxyTrust, mountWebApp } from './hosting.js';
 
@@ -278,7 +279,13 @@ export function createApp(
   app.use(cookieParser());
   const router = express.Router();
   router.get('/health', (_req, res) => res.json({ status: 'ok' }));
-  router.get('/config', (_req, res) => res.json({ aiMode: config.AI_MODE }));
+  router.get('/config', (_req, res) =>
+    res.json({
+      aiMode: config.AI_MODE,
+      freeTierOnly: config.FREE_TIER_ONLY ?? false,
+      mediaProvider: config.MEDIA_PROVIDER ?? 'gemini',
+    }),
+  );
   router.post('/sessions/guest', async (req, res) => {
     const current = req.cookies?.[config.SESSION_COOKIE_NAME];
     let token: string;
@@ -478,7 +485,7 @@ export function createApp(
           status: submitted ? 'SUBMITTED' : r.status,
           createdAt: new Date(r.createdAt).toISOString(),
           submitted,
-          errorCode: r.status === 'FAILED' ? 'GENERATION_FAILED' : null,
+          errorCode: publicGenerationFailure(r.status, r.failureCode),
         };
       }),
       page,
@@ -487,12 +494,16 @@ export function createApp(
   });
   router.get('/cases/:id/status', async (req, res) => {
     const record = await ownedCase(req, res);
+    const errorCode = publicGenerationFailure(record.status, record.failureCode);
     res.json({
       caseId: record._id,
       status: record.status,
-      stageLabel: stageLabels[record.status] ?? 'Preparing your case',
+      stageLabel:
+        errorCode === 'FREE_AI_QUOTA_EXCEEDED'
+          ? 'The free AI quota has been used. Try again after the provider quota resets.'
+          : (stageLabels[record.status] ?? 'Preparing your case'),
       canRetry: record.status === 'FAILED' && record.manualRetries < 2,
-      errorCode: record.status === 'FAILED' ? 'GENERATION_FAILED' : null,
+      errorCode,
     });
   });
   router.get('/cases/:id', async (req, res) => {

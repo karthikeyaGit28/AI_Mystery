@@ -24,7 +24,10 @@
     "provider:check": "npm run provider:check -w @amr/worker",
     "start": "npm run start -w @amr/api",
     "start:worker": "npm run start -w @amr/worker",
+    "start:combined": "node --max-old-space-size=48 scripts/start-combined.mjs",
+    "configure:free": "node scripts/configure-free.mjs",
     "deployment:runtime-check": "node scripts/check-runtime.mjs",
+    "deployment:preflight": "node scripts/check-free-deployment.mjs",
     "deployment:validate": "node scripts/validate-render.mjs",
     "infra:check": "tsx scripts/check-infrastructure.ts",
     "services:test": "tsx scripts/test-services.ts"

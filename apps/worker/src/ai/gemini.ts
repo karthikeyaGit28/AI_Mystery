@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { config } from '@amr/server';
 import {
   GenerationError,
+  EvidencePlanSchema,
   MessageSchema,
   PrivateBlueprintSchema,
   ReviewResultSchema,
@@ -17,6 +18,8 @@ import {
   type MysteryAIProvider,
   type PublicReviewInput,
 } from './contracts.js';
+import { geminiTextPacer } from './pacer.js';
+import { validateFreeVisualBriefs } from './cloudflare.js';
 
 type Interaction = {
   output_text?: string;
@@ -133,6 +136,14 @@ export class GeminiAIProvider implements MysteryAIProvider {
       );
     this.ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY, httpOptions: { timeout: 600_000 } });
   }
+  checkLocalCapability(): void {
+    if (typeof this.ai.interactions?.create !== 'function')
+      throw new GenerationError(
+        'SDK_CAPABILITY_UNAVAILABLE',
+        'The installed Google SDK does not expose the Interactions API.',
+        false,
+      );
+  }
   private async interaction(
     model: string,
     input: string,
@@ -164,6 +175,12 @@ export class GeminiAIProvider implements MysteryAIProvider {
       if (error instanceof GenerationError) throw error;
       const e = error as { status?: number; code?: number; message?: string };
       const status = Number(e.status ?? e.code ?? 0);
+      if (config.FREE_TIER_ONLY && status === 429)
+        throw new GenerationError(
+          'FREE_AI_QUOTA_EXCEEDED',
+          'The free Gemini text quota is exhausted. Try again after it resets.',
+          false,
+        );
       const blocked = /safety|prohibited|blocked|harm/i.test(e.message ?? '');
       throw new GenerationError(
         blocked
@@ -181,6 +198,7 @@ export class GeminiAIProvider implements MysteryAIProvider {
     }
   }
   private async json<T>(name: string, data: unknown, schema: z.ZodType<T>): Promise<T> {
+    await geminiTextPacer.pace(config.GEMINI_TEXT_MIN_INTERVAL_MS);
     const jsonSchema = z.toJSONSchema(schema);
     const response = await this.interaction(
       config.GEMINI_TEXT_MODEL,
@@ -199,8 +217,29 @@ export class GeminiAIProvider implements MysteryAIProvider {
     }
   }
   async generateBlueprint(input: BlueprintInput) {
-    const value = await this.json('blueprint', input, PrivateBlueprintSchema);
-    return validateBlueprint(value);
+    const schema = config.FREE_TIER_ONLY
+      ? PrivateBlueprintSchema.extend({
+          location: PrivateBlueprintSchema.shape.location.max(200),
+          evidencePlans: z
+            .array(EvidencePlanSchema.extend({ renderBrief: z.string().trim().min(1).max(1000) }))
+            .length(8),
+        })
+      : PrivateBlueprintSchema;
+    const request = config.FREE_TIER_ONLY
+      ? {
+          ...input,
+          visualConstraints: {
+            maxLocationCharacters: 200,
+            maxRenderBriefCharacters: 1000,
+            fullImagePromptLimit: 2048,
+            rule: 'Use concise complete visual briefs. All required visual facts must fit; never omit or truncate a clue.',
+          },
+        }
+      : input;
+    const blueprint = validateBlueprint(await this.json('blueprint', request, schema));
+    // Reject while generation can still retry a new blueprint, before the caller
+    // persists an immutable canon that its image provider could never render.
+    return config.FREE_TIER_ONLY ? validateFreeVisualBriefs(blueprint) : blueprint;
   }
   async reviewSolvability(input: PublicReviewInput) {
     return this.json('reviewer', input, ReviewResultSchema);
@@ -292,6 +331,12 @@ export class GeminiAIProvider implements MysteryAIProvider {
     return Buffer.concat(chunks, bytes);
   }
   async generatePhoto(input: LockedVisualInput): Promise<GeneratedMedia> {
+    if (config.FREE_TIER_ONLY)
+      throw new GenerationError(
+        'PAID_MEDIA_DISABLED',
+        'Gemini image generation is disabled by the free-only profile.',
+        false,
+      );
     const scene = `${await prompt('photo')}\n${JSON.stringify(this.allocated(input))}\nShared appearance: the fictional setting ${input.blueprint.location}; use the locked brief's architecture, period, lighting, and distinctive objects consistently across all evidence. ${input.frameIndex !== undefined ? `Surveillance frame ${input.frameIndex + 1}; static camera; show a subtly different moment of the same permitted action.` : ''}`;
     const response = await this.interaction(config.GEMINI_IMAGE_MODEL, scene, {
       type: 'image',
@@ -315,6 +360,12 @@ export class GeminiAIProvider implements MysteryAIProvider {
     };
   }
   async generateCctvVideo(input: LockedVisualInput): Promise<GeneratedMedia> {
+    if (config.FREE_TIER_ONLY)
+      throw new GenerationError(
+        'PAID_MEDIA_DISABLED',
+        'Gemini motion-video generation is disabled by the free-only profile.',
+        false,
+      );
     const response = await this.interaction(
       config.GEMINI_VIDEO_MODEL,
       `${await prompt('cctv')}\n${JSON.stringify(this.allocated(input))}`,

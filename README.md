@@ -5,8 +5,16 @@ A single-player detective game that turns a fictional premise into a case with f
 `spec.md` is retained unchanged as the implementation baseline.
 
 For production deployment, follow **[DEPLOYMENT.md](DEPLOYMENT.md)**. The supplied
-Render Blueprint runs the website/API on one HTTPS origin with a separate
-background worker, persistent Key Value queue, Atlas, and private R2 storage.
+Blueprint uses one **Render Free** container for the website/API and worker,
+**Atlas Free**, **Upstash Redis Free**, and private **Supabase Free Storage**.
+Real AI uses Gemini's free text tier plus Cloudflare Workers AI Free images;
+CCTV is compiled from AI-generated frames. Quotas and host sleep apply.
+
+After collecting the nine cloud settings in the guide, run
+`npm run configure:free`, `npm run deployment:preflight`, and
+`npm run deployment:validate` before pushing. Preflight checks configuration
+formats offline without printing secrets or consuming AI quota; it cannot
+verify provider account plans or whether credentials work.
 
 ## Start locally
 
@@ -26,30 +34,48 @@ Open **http://localhost:5173**. The API listens on port 4000; the worker runs as
 
 The default `AI_MODE=mock` needs no Google key. Its header, images, and video visibly identify **Demo Mode**. It runs the complete persistent game with deterministic test cases and actual playable test media; it does not claim to generate live AI evidence.
 
-## Enable Gemini
+## Enable live AI with free providers
 
 Edit your untracked `.env`:
 
 ```dotenv
 AI_MODE=gemini
+FREE_TIER_ONLY=true
+MEDIA_PROVIDER=cloudflare
 GEMINI_API_KEY=your-key-from-google-ai-studio
 GEMINI_TEXT_MODEL=gemini-3.8-flash
-GEMINI_IMAGE_MODEL=gemini-nano-banana-2.1
-GEMINI_VIDEO_MODEL=gemini-omni-1.1-flash
+CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+CLOUDFLARE_API_TOKEN=your-workers-ai-token
+CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
 ```
 
-Run `npm run provider:check` for a text/API capability check, then `npm run provider:check -w @amr/worker -- --full` before accepting live traffic. The full smoke test generates a case, two photos, and video or the AI-frame fallback; these calls incur provider usage. Model availability, billing, and quotas depend on the Google project. Model IDs remain configurable because the spec's defaults may not be enabled for a particular account. The worker also checks text capability at live startup. All provider calls run on the server using the official SDK; browser variables must never contain secrets.
+Run `npm run configure:free` to apply the guarded free-mode flags while preserving
+your secret values and `AI_MODE`. Keep the Google API project unbilled and the
+Cloudflare Workers plan Free. The code blocks Gemini photo/video calls in free
+mode and only permits the configured free text/image models. Provider-side
+billing tiers cannot be inspected or disabled by the app.
 
-The video pipeline first attempts the configured video model. When video is unavailable, it generates two AI surveillance frames and builds a labeled H.264 MP4 with server-authored camera/time overlays. Images have accessible captions and the recording has a transcript. Failure of both paths fails the case recoverably; it never publishes missing footage or substitutes stock footage.
+An optional `npm run provider:check -w @amr/worker -- --full` verifies real case,
+photo, and AI-frame video generation locally and consumes free quotas. Free
+worker cold starts perform an offline SDK/config check rather than repeatedly
+spending AI requests. The first live case verifies provider access. All provider
+calls stay on the server; browser variables must never contain API secrets.
 
-Relevant official references: [Interactions API](https://ai.google.dev/api/interactions-api), [structured output](https://ai.google.dev/gemini-api/docs/structured-output), [image generation](https://ai.google.dev/gemini-api/docs/image-generation), and [Omni video](https://ai.google.dev/gemini-api/docs/omni).
+Cloudflare generates actual photos and surveillance frames. The free profile
+compiles those frames into a labeled 640×360 H.264 MP4 with authored camera/time
+overlays, captions, and a transcript. Quota exhaustion fails safely for a later
+retry; it does not enable paid motion video or substitute unrelated footage.
+
+Official references: [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing),
+[Cloudflare Free AI](https://developers.cloudflare.com/workers-ai/platform/pricing/),
+[FLUX model](https://developers.cloudflare.com/workers-ai/models/flux-1-schnell/).
 
 ## Architecture
 
 ```text
 apps/web         React 19 / Vite / Router / TanStack Query
 apps/api         Express REST / guest ownership / hints / scoring
-apps/worker      BullMQ worker / Gemini and mock providers / media / cleanup
+apps/worker      BullMQ / Gemini text / Cloudflare images / mock / media / cleanup
 packages/shared  Public Zod contracts and TypeScript DTOs only
 packages/server  Private Mongoose models, configuration, queues, S3 storage
 e2e              Playwright desktop and mobile journeys
@@ -90,17 +116,19 @@ $env:STORAGE_SECRET_KEY = 'S3RVER'
 .\scripts\dev.ps1
 ```
 
-Verification on 2026-10-28: 87 automated tests, all four desktop/mobile Playwright gameplay journeys, and two browser source-isolation checks passed against real local MongoDB/Redis and S3-compatible test storage. Formatting, lint, TypeScript checking, and production builds passed. Browser checks include actual image/video playback, owner isolation, solution secrecy, saved review/bookmark state, hint limits, correct/incorrect scoring, and deletion. Live Gemini smoke testing remains blocked by the absence of a configured Google API key.
+The free deployment checks cover provider/model guards, quota handling, bounded image responses, request pacing, process supervision, and real ffmpeg compilation of mocked provider images. Hosted browser checks cover the compiled application on desktop and mobile, including the Free AI mode banner and private-file isolation. External AI calls and cloud credentials require your accounts; Linux container verification runs in GitHub CI because Docker is unavailable in this workspace.
+
+Verified on 2026-10-30: all 181 automated tests, including 25 offline deployment-input checks, passed. The 14 hosted browser checks passed, plus formatting, lint, TypeScript, production builds, Blueprint validation, and offline runtime checks.
 
 Implementation choices: the interface uses tokenized CSS and accessible native dialogs instead of Tailwind/Radix. Private media uses authenticated, signed, expiring streaming URLs rather than exposing object-store URLs; the specification explicitly permits authenticated streaming. Production deployment is prepared in `render.yaml` and `Dockerfile`; creating cloud resources remains an account setup step in the deployment guide.
 
 ## API and ownership
 
-REST endpoints use `/api/v1`. Call `POST /sessions/guest` first. Browser requests include the HTTP-only guest cookie; mutating requests must originate from `WEB_ORIGIN`. Create, hints, and solve use `Idempotency-Key` headers. Routes cover case creation/list/status/retry/deletion, public case/evidence, progress, unlocked hints, one-time solve, and gated result. `GET /config` exposes only the public provider mode; `/health` is minimal liveness.
+REST endpoints use `/api/v1`. Call `POST /sessions/guest` first. Browser requests include the HTTP-only guest cookie; mutating requests must originate from `WEB_ORIGIN`. Create, hints, and solve use `Idempotency-Key` headers. Routes cover case creation/list/status/retry/deletion, public case/evidence, progress, unlocked hints, one-time solve, and gated result. `GET /config` exposes only public provider/profile flags; `/health` is minimal liveness.
 
 Guest tokens contain 256 bits of randomness; only hashes are stored. Sessions slide for 30 days. Every case and media operation checks ownership, returning 404 to other guests. Media access is authenticated, short-lived, supports byte-range playback, and is revoked when the case is deleted. Keys, raw storage paths, private facts, future hints, and provider outputs do not appear in public case DTOs. CORS, origin checks, strict input limits, security headers, and rate limits are enabled. For a cross-site frontend deployment, add a deliberate cross-site cookie/CSRF configuration; the default is a same-site deployment.
 
-The default budget allows one active generation and three starts per guest in a rolling 24 hours. Stages use bounded retries and a 20-minute watchdog. The owner can manually retry a failed case at most twice. Cases and their private media expire 30 days after creation; maintenance performs cascading cleanup. Owner deletion revokes access immediately and schedules cleanup, with periodic recovery if enqueueing fails.
+The free Render profile allows one active generation and one start per guest in a rolling 24 hours; local defaults allow three starts. Stages use bounded retries and a 20-minute watchdog. The owner can manually retry a failed case at most twice. Cases and their private media expire 30 days after creation; maintenance performs cascading cleanup. Owner deletion revokes access immediately and schedules cleanup, with periodic recovery if enqueueing fails.
 
 ## Deployment and troubleshooting
 
@@ -108,11 +136,13 @@ Build with `npm ci && npm run build`. With `SERVE_WEB=true`, Express serves only
 `apps/web/dist`, including the SPA route fallback; API misses keep JSON 404s.
 This is the same-origin setup used by [the Render deployment](DEPLOYMENT.md).
 `TRUST_PROXY_HOPS` defaults to 0 locally and is set to 1 behind Render's edge.
-The web service and worker run independently; the production image retains the
+The API and worker run as separate processes in one free container; the image retains the
 `tsx` runtime, workspace source, and worker prompts while pruning dev dependencies.
 Run the worker as a persistent service, never inside a serverless HTTP request.
-Use managed MongoDB/Redis and a private S3-compatible bucket. Production requires
-HTTPS origins, a strong `SESSION_SECRET`, a Gemini key, and `AI_MODE=gemini`.
+Use the free managed services and private storage listed in the deployment guide.
+Production requires HTTPS origins, a strong `SESSION_SECRET`, Gemini/Cloudflare
+credentials, and `AI_MODE=gemini`. `FREE_TIER_ONLY=true` enforces the model/provider
+allowlist, one worker, lower media limits, and lower-memory processing.
 Your local `.env` is excluded from the container and does not configure Render.
 
 - **Queue unavailable:** start Redis and check `REDIS_URL`; no successful queue response is fabricated.
