@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { GoogleGenAI, type Interactions } from '@google/genai';
+import { GoogleGenAI, type AutomaticContinuationOption, type Interactions } from '@google/genai';
 import { z } from 'zod';
 import { config } from '@amr/server';
 import {
@@ -23,7 +23,7 @@ import { validateFreeVisualBriefs } from './cloudflare.js';
 
 type Interaction = {
   output_text?: string;
-  output_image?: { data?: string; mime_type?: string };
+  output_image?: { data?: string; mime_type?: string; uri?: string };
   output_video?: { data?: string; mime_type?: string; uri?: string };
   status?: string;
 };
@@ -60,8 +60,8 @@ const RawInteractionSchema = z
   })
   .passthrough();
 
-// The pinned SDK exposes outputs[], while newer API docs also show convenience
-// accessors. Normalize both SDK forms and the model-output-only REST steps form.
+// SDK 2 exposes convenience accessors and model-output steps. The older outputs
+// array is accepted only for stored fixtures; live requests use the current API.
 export function normalizeInteraction(value: unknown): Interaction {
   const raw = RawInteractionSchema.parse(value);
   const content = [
@@ -83,25 +83,44 @@ export function normalizeInteraction(value: unknown): Interaction {
   };
 }
 
+type RequestedFormat =
+  | { type: 'text'; schema: Record<string, unknown>; mime_type?: string }
+  | { type: 'image'; aspect_ratio?: string }
+  | { type: 'video'; aspect_ratio?: string };
+type InteractionRequest =
+  Interactions.InteractionCreateParams.CreateModelInteractionParamsNonStreaming &
+    AutomaticContinuationOption;
+
 export function interactionRequest(
   model: string,
   input: string,
-  format?: Record<string, unknown>,
-): Interactions.CreateModelInteractionParamsNonStreaming {
-  const request: Interactions.CreateModelInteractionParamsNonStreaming = {
+  format?: RequestedFormat,
+): InteractionRequest {
+  const request: InteractionRequest = {
     model,
     input,
     stream: false,
     store: false,
+    automatic_continuation: false,
   };
   if (format?.type === 'text') {
-    request.response_format = format.schema;
-    request.response_mime_type = 'application/json';
-    request.response_modalities = ['text'];
+    // Interactions posts response_format verbatim. Its current wire contract
+    // wraps structured JSON in a text format rather than a bare JSON schema.
+    request.response_format = {
+      type: 'text',
+      mime_type: 'application/json',
+      schema: format.schema,
+    };
   } else if (format?.type === 'image') {
-    request.response_modalities = ['image'];
-    request.generation_config = { image_config: { aspect_ratio: '16:9' } };
-  } else if (format?.type === 'video') request.response_modalities = ['video'];
+    request.response_format = {
+      type: 'image',
+      mime_type: 'image/jpeg',
+      aspect_ratio: '16:9',
+      image_size: '1K',
+      delivery: 'inline',
+    };
+  } else if (format?.type === 'video')
+    request.response_format = { type: 'video', aspect_ratio: '16:9', delivery: 'inline' };
   return request;
 }
 const promptFiles = new Map<string, string>();
@@ -147,7 +166,7 @@ export class GeminiAIProvider implements MysteryAIProvider {
   private async interaction(
     model: string,
     input: string,
-    format?: Record<string, unknown>,
+    format?: RequestedFormat,
   ): Promise<Interaction> {
     const interactions = this.ai.interactions;
     if (!interactions?.create)
@@ -158,13 +177,21 @@ export class GeminiAIProvider implements MysteryAIProvider {
       );
     try {
       const response = normalizeInteraction(
-        await interactions.create(interactionRequest(model, input, format)),
+        await interactions.create(interactionRequest(model, input, format), {
+          timeout_ms: 600_000,
+          retries: { strategy: 'none' },
+        }),
       );
       if (
         response.status &&
-        ['failed', 'cancelled', 'requires_action', 'incomplete', 'in_progress'].includes(
-          response.status,
-        )
+        [
+          'failed',
+          'cancelled',
+          'requires_action',
+          'incomplete',
+          'in_progress',
+          'requires_continuation',
+        ].includes(response.status)
       )
         throw new GenerationError(
           'PROVIDER_GENERATION_FAILED',

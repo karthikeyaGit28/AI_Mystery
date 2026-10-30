@@ -207,15 +207,18 @@ describe('free-only billing guards', () => {
     const request = create.mock.calls[0]![0] as {
       input: string;
       response_format: {
-        properties: {
-          location: { maxLength: number };
-          evidencePlans: { items: { properties: { renderBrief: { maxLength: number } } } };
+        schema: {
+          properties: {
+            location: { maxLength: number };
+            evidencePlans: { items: { properties: { renderBrief: { maxLength: number } } } };
+          };
         };
       };
     };
-    expect(request.response_format.properties.location.maxLength).toBe(200);
+    expect(request.response_format.schema.properties.location.maxLength).toBe(200);
     expect(
-      request.response_format.properties.evidencePlans.items.properties.renderBrief.maxLength,
+      request.response_format.schema.properties.evidencePlans.items.properties.renderBrief
+        .maxLength,
     ).toBe(1000);
     expect(request.input).toContain('visualConstraints');
   });
@@ -238,6 +241,8 @@ describe('free-only billing guards', () => {
       retryable: false,
     });
     expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]![0]).toMatchObject({ automatic_continuation: false });
+    expect(create.mock.calls[0]![1]).toMatchObject({ retries: { strategy: 'none' } });
   });
   it('uses low-memory dimensions and single-threaded media processing', () => {
     expect(mediaDimensions()).toEqual({ width: 640, height: 360 });

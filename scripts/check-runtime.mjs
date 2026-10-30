@@ -1,5 +1,6 @@
 import { access, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { GoogleGenAI } from '@google/genai';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
@@ -44,6 +45,24 @@ if (!html.includes('/assets/'))
 const sdk = new GoogleGenAI({ apiKey: 'offline-runtime-check-no-network' });
 if (typeof sdk.interactions.create !== 'function')
   throw new Error('Gemini Interactions support is missing.');
+let sdkDirectory = dirname(fileURLToPath(import.meta.resolve('@google/genai')));
+let sdkVersion;
+for (let depth = 0; depth < 5; depth++) {
+  try {
+    const metadata = JSON.parse(await readFile(join(sdkDirectory, 'package.json'), 'utf8'));
+    if (metadata.name === '@google/genai') {
+      sdkVersion = metadata.version;
+      break;
+    }
+  } catch {
+    // The entry point can be nested under dist/node; walk to its package root.
+  }
+  sdkDirectory = dirname(sdkDirectory);
+}
+if (!sdkVersion || Number(sdkVersion.split('.')[0]) < 2)
+  throw new Error(
+    'Gemini Interactions requires @google/genai 2.0.0 or newer; reinstall from the updated lockfile.',
+  );
 const binaries = [
   process.env.FFMPEG_PATH && process.env.FFMPEG_PATH !== 'ffmpeg'
     ? process.env.FFMPEG_PATH

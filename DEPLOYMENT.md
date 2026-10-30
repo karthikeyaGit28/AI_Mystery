@@ -310,6 +310,12 @@ do not run it repeatedly alongside the live worker.
 
 ## If a deployment step fails
 
+If a case fails at `GENERATING_BLUEPRINT` with `PROVIDER_REQUEST_FAILED`, check
+the worker's SDK version before spending retries. Google rejects the retired
+1.x Interactions protocol with HTTP 400. The repository now requires SDK 2.0.0
+or newer and sends structured JSON using the current `response_format` wrapper.
+See [Google's migration guide](https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026).
+
 If the Blueprint page shows only **Retry**, read the error above its YAML
 preview. Render checks plan-specific restrictions in addition to the official
 JSON schema used by the local validator. Keep credentials in the dashboard's
@@ -358,7 +364,7 @@ The original `spec.md` is retained unchanged. Cloud provisioning, account-tier
 verification, and real provider calls require your accounts; local tests do not
 prove your external credentials or deployed resource limits.
 
-Local verification on 2026-10-30: all 181 automated tests, including 25 offline
+Local verification on 2026-10-30: all 182 automated tests, including 25 offline
 deployment-input checks, passed. The 14 hosted
 desktop/mobile browser checks passed, along with formatting, lint, TypeScript,
 production builds, Blueprint validation, and offline runtime checks. Provider
