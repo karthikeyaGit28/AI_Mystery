@@ -10,7 +10,6 @@ services:
     dockerContext: .
     dockerCommand: node --max-old-space-size=48 scripts/start-combined.mjs
     healthCheckPath: /api/v1/health
-    maxShutdownDelaySeconds: 30
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV

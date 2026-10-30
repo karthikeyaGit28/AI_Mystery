@@ -310,6 +310,11 @@ do not run it repeatedly alongside the live worker.
 
 ## If a deployment step fails
 
+If the Blueprint page shows only **Retry**, read the error above its YAML
+preview. Render checks plan-specific restrictions in addition to the official
+JSON schema used by the local validator. Keep credentials in the dashboard's
+secret inputs when setup resumes.
+
 | Symptom                                                      | Next action                                                                                                                                 |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm.cmd` is not recognized                                  | Run the PowerShell `$env:Path` line in step 6 in that same terminal.                                                                        |

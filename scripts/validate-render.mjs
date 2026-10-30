@@ -33,6 +33,8 @@ if (
   );
 if (service.dockerCommand !== 'node --max-old-space-size=48 scripts/start-combined.mjs')
   throw new Error('The free host must supervise both API and worker inside its one container.');
+if (Object.hasOwn(service, 'maxShutdownDelaySeconds'))
+  throw new Error('Render Free does not support maxShutdownDelaySeconds; omit that setting.');
 const variables = new Map((service.envVars ?? []).map((variable) => [variable.key, variable]));
 for (const [key, value] of Object.entries({
   AI_MODE: 'gemini',
