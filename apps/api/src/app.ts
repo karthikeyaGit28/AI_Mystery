@@ -35,6 +35,7 @@ import {
   stageLabels,
   normalizeByteRange,
 } from './domain.js';
+import { configureProxyTrust, mountWebApp } from './hosting.js';
 
 const logger = pino({ level: config.NODE_ENV === 'test' ? 'silent' : 'info' });
 const DAY = 86_400_000;
@@ -204,8 +205,12 @@ async function authenticate(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-export function createApp() {
+export function createApp(
+  options: { serveWeb?: boolean; webDistPath?: string; trustProxyHops?: number } = {},
+) {
   const app = express();
+  const serveWeb = options.serveWeb ?? config.SERVE_WEB ?? false;
+  configureProxyTrust(app, options.trustProxyHops ?? config.TRUST_PROXY_HOPS ?? 0);
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     context(res).requestId = randomUUID();
@@ -213,7 +218,23 @@ export function createApp() {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: serveWeb ? 'same-origin' : 'cross-origin' },
+      contentSecurityPolicy: {
+        directives: {
+          'script-src': ["'self'"],
+          'connect-src': ["'self'"],
+          'img-src': ["'self'", 'data:', 'blob:'],
+          'media-src': ["'self'", 'blob:'],
+          'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          'font-src': ["'self'", 'https://fonts.gstatic.com'],
+          'frame-ancestors': ["'none'"],
+          'upgrade-insecure-requests': config.NODE_ENV === 'production' ? [] : null,
+        },
+      },
+    }),
+  );
   app.use(
     cors({
       origin: config.WEB_ORIGIN,
@@ -222,11 +243,13 @@ export function createApp() {
     }),
   );
   app.use(
+    '/api',
     rateLimit({
       windowMs: 60_000,
       limit: 180,
       standardHeaders: 'draft-8',
       legacyHeaders: false,
+      skip: (req) => req.method === 'GET' && req.originalUrl.split('?')[0] === '/api/v1/health',
       handler: (_req, _res, next) =>
         next(new HttpError(429, 'RATE_LIMITED', 'Too many requests. Please try again shortly.')),
     }),
@@ -286,7 +309,7 @@ export function createApp() {
     });
     res.json({ sessionReady: true });
   });
-  router.use(authenticate);
+  router.use('/cases', authenticate);
   router.post('/cases', async (req, res) => {
     const input = CreateCaseRequestSchema.parse(req.body);
     assertSafePremise(input.premise);
@@ -778,6 +801,10 @@ export function createApp() {
     res.json(await verdict(record, await getProgress(record, res)));
   });
   app.use('/api/v1', router);
+  app.use('/api', (_req, _res, next) =>
+    next(new HttpError(404, 'NOT_FOUND', 'This API endpoint is unavailable.')),
+  );
+  if (serveWeb) mountWebApp(app, options.webDistPath ?? config.WEB_DIST_PATH);
   app.use((_req, _res, next) =>
     next(new HttpError(404, 'NOT_FOUND', 'This endpoint is unavailable.')),
   );

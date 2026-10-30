@@ -1,40 +1,30 @@
-import { MongoClient } from 'mongodb';
-import { Redis } from 'ioredis';
-import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
-import { config } from '@amr/server';
+import {
+  assertQueueAvailable,
+  closeQueues,
+  connectDatabase,
+  disconnectDatabase,
+  s3,
+  storage,
+} from '@amr/server';
 
-const mongo = new MongoClient(config.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
-const redis = new Redis(config.REDIS_URL, {
-  lazyConnect: true,
-  connectTimeout: 5000,
-  retryStrategy: () => null,
-});
-const s3 = new S3Client({
-  endpoint: config.STORAGE_ENDPOINT,
-  region: config.STORAGE_REGION,
-  forcePathStyle: config.STORAGE_FORCE_PATH_STYLE,
-  credentials: {
-    accessKeyId: config.STORAGE_ACCESS_KEY,
-    secretAccessKey: config.STORAGE_SECRET_KEY,
-  },
-});
+// Reuse server clients so the command also works after dev dependencies are pruned.
 try {
-  await mongo.connect();
-  await mongo.db().command({ ping: 1 });
+  await connectDatabase();
   console.log('MongoDB: ready');
-  await redis.connect();
-  await redis.ping();
+  await assertQueueAvailable();
   console.log('Redis: ready');
-  await s3.send(new HeadBucketCommand({ Bucket: config.STORAGE_BUCKET }));
+  await storage.checkBucket();
   console.log('Private media bucket: ready');
-} catch (error) {
+} catch {
   console.error(
-    'Infrastructure check failed:',
-    error instanceof Error ? error.message : 'Unknown error',
+    'Infrastructure check failed. Verify database access, queue availability, and private bucket settings.',
   );
   process.exitCode = 1;
 } finally {
-  await mongo.close();
-  redis.disconnect();
+  const deadline = setTimeout(() => process.exit(process.exitCode ?? 1), 3000);
+  deadline.unref();
   s3.destroy();
+  await Promise.allSettled([closeQueues(), disconnectDatabase()]);
+  clearTimeout(deadline);
+  process.exit(process.exitCode ?? 0);
 }

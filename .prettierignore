@@ -5,5 +5,7 @@ dist
 package-lock.json
 spec.md
 test-results
+test-results-hosted
 playwright-report
 coverage
+deploy/render.schema.json

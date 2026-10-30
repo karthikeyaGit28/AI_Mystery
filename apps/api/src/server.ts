@@ -12,7 +12,7 @@ const logger = pino();
 await connectDatabase();
 await ensureStorageBucket();
 const app = createApp();
-const server = app.listen(config.PORT, () =>
+const server = app.listen(config.PORT, config.HOST, () =>
   logger.info({ port: config.PORT, aiMode: config.AI_MODE }, 'AI Mystery Room API ready'),
 );
 let closing = false;

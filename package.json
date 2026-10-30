@@ -19,8 +19,13 @@
     "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/worker/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:hosting": "playwright test --config playwright.hosted.config.ts",
     "e2e:install": "playwright install chromium",
     "provider:check": "npm run provider:check -w @amr/worker",
+    "start": "npm run start -w @amr/api",
+    "start:worker": "npm run start -w @amr/worker",
+    "deployment:runtime-check": "node scripts/check-runtime.mjs",
+    "deployment:validate": "node scripts/validate-render.mjs",
     "infra:check": "tsx scripts/check-infrastructure.ts",
     "services:test": "tsx scripts/test-services.ts"
   },
@@ -36,9 +41,13 @@
     "mongodb-memory-server": "^11.3.0",
     "prettier": "^3.5.3",
     "s3rver": "^3.7.1",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.31.1",
-    "vitest": "^3.1.2"
+    "vitest": "^3.1.2",
+    "ajv": "^8.17.1",
+    "yaml": "^2.8.1"
+  },
+  "dependencies": {
+    "tsx": "^4.19.4"
   }
 }

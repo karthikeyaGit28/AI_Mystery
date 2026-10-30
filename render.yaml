@@ -1,0 +1,198 @@
+# Render will show the paid-service estimate before you create this Blueprint.
+# Secrets are entered in Render, never in this tracked file.
+services:
+  - type: web
+    name: amr-web
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node --import tsx apps/api/src/server.ts
+    healthCheckPath: /api/v1/health
+    maxShutdownDelaySeconds: 30
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: '10000'
+      - key: SERVE_WEB
+        value: 'true'
+      - key: TRUST_PROXY_HOPS
+        value: '1'
+      - key: WEB_ORIGIN
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: API_BASE_URL
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: MONGODB_URI
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: amr-queue
+          property: connectionString
+      - key: SESSION_COOKIE_NAME
+        value: amr_guest
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: AI_MODE
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TEXT_MODEL
+        value: gemini-3.8-flash
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-nano-banana-2.1
+      - key: GEMINI_VIDEO_MODEL
+        value: gemini-omni-1.1-flash
+      - key: STORAGE_ENDPOINT
+        sync: false
+      - key: STORAGE_REGION
+        value: auto
+      - key: STORAGE_BUCKET
+        value: ai-mystery-private
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_FORCE_PATH_STYLE
+        value: 'true'
+      - key: MAX_ACTIVE_GENERATIONS_PER_SESSION
+        value: '1'
+      - key: MAX_NEW_CASES_PER_SESSION_PER_24H
+        value: '3'
+      - key: GENERATION_WATCHDOG_MINUTES
+        value: '20'
+      - key: CASE_RETENTION_DAYS
+        value: '30'
+      - key: WORKER_CONCURRENCY
+        value: '1'
+      - key: MAX_MEDIA_BYTES
+        value: '52428800'
+
+  - type: worker
+    name: amr-worker
+    runtime: docker
+    region: singapore
+    plan: 1c-2g
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node --import tsx apps/worker/src/worker.ts
+    maxShutdownDelaySeconds: 30
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SERVE_WEB
+        value: 'false'
+      - key: WEB_ORIGIN
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: WEB_ORIGIN
+      - key: API_BASE_URL
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: API_BASE_URL
+      - key: MONGODB_URI
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: MONGODB_URI
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: amr-queue
+          property: connectionString
+      - key: SESSION_SECRET
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: SESSION_SECRET
+      - key: AI_MODE
+        value: gemini
+      - key: GEMINI_API_KEY
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: GEMINI_API_KEY
+      - key: GEMINI_TEXT_MODEL
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: GEMINI_TEXT_MODEL
+      - key: GEMINI_IMAGE_MODEL
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: GEMINI_IMAGE_MODEL
+      - key: GEMINI_VIDEO_MODEL
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: GEMINI_VIDEO_MODEL
+      - key: STORAGE_ENDPOINT
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: STORAGE_ENDPOINT
+      - key: STORAGE_REGION
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: STORAGE_REGION
+      - key: STORAGE_BUCKET
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: STORAGE_BUCKET
+      - key: STORAGE_ACCESS_KEY
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: STORAGE_ACCESS_KEY
+      - key: STORAGE_SECRET_KEY
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: STORAGE_SECRET_KEY
+      - key: STORAGE_FORCE_PATH_STYLE
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: STORAGE_FORCE_PATH_STYLE
+      - key: GENERATION_WATCHDOG_MINUTES
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: GENERATION_WATCHDOG_MINUTES
+      - key: CASE_RETENTION_DAYS
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: CASE_RETENTION_DAYS
+      - key: WORKER_CONCURRENCY
+        value: '1'
+      - key: MAX_MEDIA_BYTES
+        fromService:
+          type: web
+          name: amr-web
+          envVarKey: MAX_MEDIA_BYTES
+
+  - type: keyvalue
+    name: amr-queue
+    region: singapore
+    plan: 256mb
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+    ipAllowList: []

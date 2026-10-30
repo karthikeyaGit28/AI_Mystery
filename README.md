@@ -4,6 +4,10 @@ A single-player detective game that turns a fictional premise into a case with f
 
 `spec.md` is retained unchanged as the implementation baseline.
 
+For production deployment, follow **[DEPLOYMENT.md](DEPLOYMENT.md)**. The supplied
+Render Blueprint runs the website/API on one HTTPS origin with a separate
+background worker, persistent Key Value queue, Atlas, and private R2 storage.
+
 ## Start locally
 
 Prerequisites: Node.js **22.23.4** (the tested runtime; see `.nvmrc`), npm, and Docker Desktop with Compose. The npm media packages provide ffmpeg and ffprobe for supported platforms; set absolute `FFMPEG_PATH` / `FFPROBE_PATH` values to use your own binaries.
@@ -88,7 +92,7 @@ $env:STORAGE_SECRET_KEY = 'S3RVER'
 
 Verification on 2026-10-28: 87 automated tests, all four desktop/mobile Playwright gameplay journeys, and two browser source-isolation checks passed against real local MongoDB/Redis and S3-compatible test storage. Formatting, lint, TypeScript checking, and production builds passed. Browser checks include actual image/video playback, owner isolation, solution secrecy, saved review/bookmark state, hint limits, correct/incorrect scoring, and deletion. Live Gemini smoke testing remains blocked by the absence of a configured Google API key.
 
-Implementation choices: the interface uses tokenized CSS and accessible native dialogs instead of Tailwind/Radix. Private media uses authenticated, signed, expiring streaming URLs rather than exposing object-store URLs; the specification explicitly permits authenticated streaming. No hosted deployment was created because this workspace builds the independently deployable MERN services required by the specification.
+Implementation choices: the interface uses tokenized CSS and accessible native dialogs instead of Tailwind/Radix. Private media uses authenticated, signed, expiring streaming URLs rather than exposing object-store URLs; the specification explicitly permits authenticated streaming. Production deployment is prepared in `render.yaml` and `Dockerfile`; creating cloud resources remains an account setup step in the deployment guide.
 
 ## API and ownership
 
@@ -100,7 +104,16 @@ The default budget allows one active generation and three starts per guest in a 
 
 ## Deployment and troubleshooting
 
-Build with `npm ci && npm run build`. Deploy the frontend's `apps/web/dist` with SPA route fallback. Deploy API and worker independently from the source checkout using `npm run start -w @amr/api` and `npm run start -w @amr/worker`. Their start scripts execute TypeScript with the pinned `tsx` runtime; include workspace source and worker prompt files. Run the worker as a persistent service, never inside a serverless HTTP request. Use private managed MongoDB, Redis, and S3-compatible object storage. Provide a private bucket, HTTPS, a strong `SESSION_SECRET`, correct origins, and managed secrets. Production refuses mock mode or a missing Gemini key. A reverse proxy must preserve the configured origin; configure trusted proxies deliberately before changing IP-based limits.
+Build with `npm ci && npm run build`. With `SERVE_WEB=true`, Express serves only
+`apps/web/dist`, including the SPA route fallback; API misses keep JSON 404s.
+This is the same-origin setup used by [the Render deployment](DEPLOYMENT.md).
+`TRUST_PROXY_HOPS` defaults to 0 locally and is set to 1 behind Render's edge.
+The web service and worker run independently; the production image retains the
+`tsx` runtime, workspace source, and worker prompts while pruning dev dependencies.
+Run the worker as a persistent service, never inside a serverless HTTP request.
+Use managed MongoDB/Redis and a private S3-compatible bucket. Production requires
+HTTPS origins, a strong `SESSION_SECRET`, a Gemini key, and `AI_MODE=gemini`.
+Your local `.env` is excluded from the container and does not configure Render.
 
 - **Queue unavailable:** start Redis and check `REDIS_URL`; no successful queue response is fabricated.
 - **Private media fails:** check the bucket bootstrap, S3 endpoint/region/credentials, and worker logs. Restarting does not regenerate a locked solution.

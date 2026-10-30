@@ -12,6 +12,7 @@ export default tseslint.config(
       '.runtime/**',
       'playwright-report/**',
       'test-results/**',
+      'test-results-hosted/**',
       'coverage/**',
     ],
   },

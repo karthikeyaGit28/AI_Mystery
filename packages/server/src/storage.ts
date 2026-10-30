@@ -19,6 +19,7 @@ export const s3 = new S3Client({
   maxAttempts: 3,
 });
 export const storage = {
+  checkBucket: () => s3.send(new HeadBucketCommand({ Bucket: config.STORAGE_BUCKET })),
   async putObject(key: string, body: Buffer | Uint8Array, mimeType: string) {
     if (body.byteLength > config.MAX_MEDIA_BYTES) throw new Error('MEDIA_TOO_LARGE');
     await s3.send(
