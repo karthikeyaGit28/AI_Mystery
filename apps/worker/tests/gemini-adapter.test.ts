@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GoogleGenAI } from '@google/genai';
-import { interactionRequest, normalizeInteraction } from '../src/ai/gemini.js';
+import { config } from '@amr/server';
+import { GeminiAIProvider, interactionRequest, normalizeInteraction } from '../src/ai/gemini.js';
 
 describe('installed official Gemini SDK contract', () => {
   it('uses the documented Interactions structured-text wrapper', () => {
@@ -56,6 +57,67 @@ describe('installed official Gemini SDK contract', () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(normalizeInteraction(response).output_text).toBe('{"ok":true}');
   });
+  it.each([
+    { status: 400, name: 'BadRequestError', code: 'PROVIDER_REQUEST_FAILED', retryable: false },
+    {
+      status: 400,
+      name: 'BadRequestError',
+      code: 'PROVIDER_SCHEMA_REJECTED',
+      retryable: false,
+      message: 'The specified schema produces a constraint that has too many states for serving.',
+    },
+    { status: 429, name: 'RateLimitError', code: 'FREE_AI_QUOTA_EXCEEDED', retryable: false },
+    { status: 503, code: 'PROVIDER_BUSY', retryable: true },
+  ])(
+    'maps actual SDK HTTP $status errors without hidden retries',
+    async ({ status, name, code, retryable, message }) => {
+      const request = vi.fn<typeof fetch>().mockImplementation(async () =>
+        Response.json(
+          {
+            error: {
+              code: status,
+              message: message ?? 'Offline HTTP error fixture',
+              status:
+                status === 429
+                  ? 'RESOURCE_EXHAUSTED'
+                  : status === 503
+                    ? 'UNAVAILABLE'
+                    : 'INVALID_ARGUMENT',
+            },
+          },
+          { status },
+        ),
+      );
+      const client = new GoogleGenAI({
+        apiKey: 'offline-http-error-key',
+        httpOptions: { fetch: request },
+      });
+      await expect(
+        client.interactions.create(
+          interactionRequest('gemini-3.8-flash', 'offline', {
+            type: 'text',
+            schema: { type: 'object' },
+          }),
+          { retries: { strategy: 'none' } },
+        ),
+      ).rejects.toMatchObject({ ...(name ? { name } : {}), status, statusCode: status });
+      expect(request).toHaveBeenCalledTimes(1);
+
+      request.mockClear();
+      const freeTierOnly = config.FREE_TIER_ONLY;
+      config.FREE_TIER_ONLY = true;
+      try {
+        const provider = new GeminiAIProvider();
+        // Use the same real SDK with its injected offline transport in the adapter.
+        // No provider endpoint can be reached, and the adapter receives SDK errors.
+        Reflect.set(provider, 'ai', client);
+        await expect(provider.checkCapability()).rejects.toMatchObject({ code, retryable });
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        config.FREE_TIER_ONLY = freeTierOnly;
+      }
+    },
+  );
   it('uses current image and video response formats without legacy configuration', () => {
     expect(interactionRequest('configured-image-model', 'input', { type: 'image' })).toMatchObject({
       response_format: {

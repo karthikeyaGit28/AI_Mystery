@@ -119,9 +119,19 @@ describe('free-tier-only generation configuration', () => {
     expect(result.WORKER_STALLED_INTERVAL_MS).toBe(180000);
     expect(result.MAX_MEDIA_BYTES).toBe(10 * 1024 * 1024);
   });
+  it.each(['gemini-3.8-flash', 'gemini-3.6-flash'])(
+    'accepts the explicitly selected verified free text model %s',
+    (model) => {
+      expect(parseEnvironment({ ...freeLive, GEMINI_TEXT_MODEL: model }).GEMINI_TEXT_MODEL).toBe(
+        model,
+      );
+    },
+  );
   it.each([
     { MEDIA_PROVIDER: 'gemini' },
     { GEMINI_TEXT_MODEL: 'gemini-pro-paid' },
+    { GEMINI_TEXT_MODEL: 'gemini-3.9-flash' },
+    { GEMINI_TEXT_MODEL: 'gemini-3.6-flash-preview' },
     { CLOUDFLARE_IMAGE_MODEL: '@cf/paid-image-model' },
     { WORKER_CONCURRENCY: '2' },
     { MAX_MEDIA_BYTES: String(20 * 1024 * 1024 + 1) },

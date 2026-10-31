@@ -124,8 +124,10 @@ export function parseEnvironment(source: Record<string, unknown>) {
       throw new Error(
         'FREE_TIER_ONLY requires MEDIA_PROVIDER=cloudflare; paid Gemini image/video generation is disabled.',
       );
-    if (result.GEMINI_TEXT_MODEL !== 'gemini-3.8-flash')
-      throw new Error('FREE_TIER_ONLY permits only the verified free text model gemini-3.8-flash.');
+    if (!['gemini-3.8-flash', 'gemini-3.6-flash'].includes(result.GEMINI_TEXT_MODEL))
+      throw new Error(
+        'FREE_TIER_ONLY permits only the verified free text models gemini-3.8-flash and gemini-3.6-flash.',
+      );
     if (result.CLOUDFLARE_IMAGE_MODEL !== '@cf/black-forest-labs/flux-1-schnell')
       throw new Error(
         'FREE_TIER_ONLY permits only the free Cloudflare FLUX.1 Schnell image model.',

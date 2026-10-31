@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { parse } from 'yaml';
+import { isVerifiedFreeTextModel } from './free-text-models.mjs';
 
 const root = new URL('../', import.meta.url);
 const schema = JSON.parse(await readFile(new URL('deploy/render.schema.json', root), 'utf8'));
@@ -36,11 +37,12 @@ if (service.dockerCommand !== 'node --max-old-space-size=48 scripts/start-combin
 if (Object.hasOwn(service, 'maxShutdownDelaySeconds'))
   throw new Error('Render Free does not support maxShutdownDelaySeconds; omit that setting.');
 const variables = new Map((service.envVars ?? []).map((variable) => [variable.key, variable]));
+if (!isVerifiedFreeTextModel(variables.get('GEMINI_TEXT_MODEL')?.value))
+  throw new Error('Missing or unsafe free-profile setting: GEMINI_TEXT_MODEL.');
 for (const [key, value] of Object.entries({
   AI_MODE: 'gemini',
   FREE_TIER_ONLY: 'true',
   MEDIA_PROVIDER: 'cloudflare',
-  GEMINI_TEXT_MODEL: 'gemini-3.8-flash',
   CLOUDFLARE_IMAGE_MODEL: '@cf/black-forest-labs/flux-1-schnell',
   WORKER_CONCURRENCY: '1',
   MAX_MEDIA_BYTES: '20971520',

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkFreeDeploymentInputs } from '../../../scripts/check-free-deployment.mjs';
+import { configureFreeEnvironment } from '../../../scripts/configure-free.mjs';
+import { isVerifiedFreeTextModel } from '../../../scripts/free-text-models.mjs';
 
 const freeSettings = {
   FREE_TIER_ONLY: 'true',
@@ -24,6 +26,20 @@ const keys = (source: Record<string, string>) =>
   checkFreeDeploymentInputs(source).map((issue: { key: string }) => issue.key);
 
 describe('offline free deployment inputs', () => {
+  it.each(['gemini-3.8-flash', 'gemini-3.6-flash'])(
+    'accepts the explicit verified free text model %s in preflight and Blueprint guards',
+    (model) => {
+      expect(isVerifiedFreeTextModel(model)).toBe(true);
+      expect(checkFreeDeploymentInputs({ ...valid, GEMINI_TEXT_MODEL: model })).toEqual([]);
+    },
+  );
+  it.each(['gemini-pro-paid', 'gemini-3.9-flash', 'gemini-3.6-flash-preview'])(
+    'rejects unverified text model %s in preflight and Blueprint guards',
+    (model) => {
+      expect(isVerifiedFreeTextModel(model)).toBe(false);
+      expect(keys({ ...valid, GEMINI_TEXT_MODEL: model })).toContain('GEMINI_TEXT_MODEL');
+    },
+  );
   it('accepts realistic formats while allowing local demo, development URLs, and development session settings', () => {
     expect(
       checkFreeDeploymentInputs({
@@ -125,5 +141,33 @@ describe('offline free deployment inputs', () => {
     for (const value of Object.values(source)) expect(output).not.toContain(value);
     expect(output).not.toContain('private-redis-token');
     expect(output).not.toContain('private-storage-secret');
+  });
+});
+
+describe('free setup preserves explicit model selection without filesystem writes', () => {
+  it.each(['gemini-3.8-flash', 'gemini-3.6-flash'])(
+    'preserves verified selection %s and existing credentials',
+    (model) => {
+      const source = `GEMINI_TEXT_MODEL="${model}" # explicit selection\r\nAI_MODE=mock\r\nGEMINI_API_KEY=fake-test-key\r\n CLOUDFLARE_API_TOKEN = fake-test-token\r\n`;
+      const result = configureFreeEnvironment(source);
+      expect(result).toContain(`GEMINI_TEXT_MODEL=${model}\r\n`);
+      expect(result).toContain('AI_MODE=mock\r\n');
+      expect(result).toContain('GEMINI_API_KEY=fake-test-key\r\n');
+      expect(result).toContain(' CLOUDFLARE_API_TOKEN = fake-test-token\r\n');
+      expect(result).not.toMatch(/^CLOUDFLARE_API_TOKEN=$/m);
+    },
+  );
+  it('keeps 3.8 as the default and replaces unsupported selections with that safe default', () => {
+    expect(configureFreeEnvironment('')).toContain('GEMINI_TEXT_MODEL=gemini-3.8-flash');
+    expect(configureFreeEnvironment('GEMINI_TEXT_MODEL=gemini-pro-paid\n')).toContain(
+      'GEMINI_TEXT_MODEL=gemini-3.8-flash',
+    );
+  });
+  it('preserves the last effective verified model when the source contains repeated assignments', () => {
+    const result = configureFreeEnvironment(
+      'GEMINI_TEXT_MODEL=gemini-3.8-flash\nGEMINI_TEXT_MODEL=gemini-3.6-flash\n',
+    );
+    expect(result).not.toContain('GEMINI_TEXT_MODEL=gemini-3.8-flash');
+    expect(result.match(/GEMINI_TEXT_MODEL=gemini-3.6-flash/g)).toHaveLength(2);
   });
 });

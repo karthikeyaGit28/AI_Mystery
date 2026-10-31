@@ -278,7 +278,13 @@ export function createApp(
   app.use(express.json({ limit: '16kb', strict: true }));
   app.use(cookieParser());
   const router = express.Router();
-  router.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  router.get('/health', (_req, res) => {
+    // Render supplies this public source revision. Keep the liveness body small
+    // while allowing a release to be verified without dashboard credentials.
+    const revision = process.env.RENDER_GIT_COMMIT;
+    if (revision && /^[a-f0-9]{40}$/i.test(revision)) res.set('X-App-Revision', revision);
+    res.json({ status: 'ok' });
+  });
   router.get('/config', (_req, res) =>
     res.json({
       aiMode: config.AI_MODE,

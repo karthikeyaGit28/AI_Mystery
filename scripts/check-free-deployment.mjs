@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isVerifiedFreeTextModel } from './free-text-models.mjs';
 
 const placeholders =
   /^(?:<.*>|\[.*\]|your(?:[-_ ].*)?|replace(?:[-_ ].*)?|change[-_ ]?me.*|paste(?:[-_ ].*)?|placeholder.*|example.*|password|username|local-dev-only|s3rver|anon|service_role|x{3,}|0+)$/i;
@@ -127,8 +128,11 @@ export function checkFreeDeploymentInputs(source) {
       'MEDIA_PROVIDER',
       'Set MEDIA_PROVIDER=cloudflare to avoid Gemini paid image and video APIs.',
     );
-  if (get('GEMINI_TEXT_MODEL') !== 'gemini-3.8-flash')
-    add('GEMINI_TEXT_MODEL', 'Use gemini-3.8-flash for the supported free deployment route.');
+  if (!isVerifiedFreeTextModel(get('GEMINI_TEXT_MODEL')))
+    add(
+      'GEMINI_TEXT_MODEL',
+      'Use gemini-3.8-flash or the explicitly selected gemini-3.6-flash free alternative.',
+    );
   if (get('CLOUDFLARE_IMAGE_MODEL') !== '@cf/black-forest-labs/flux-1-schnell')
     add(
       'CLOUDFLARE_IMAGE_MODEL',

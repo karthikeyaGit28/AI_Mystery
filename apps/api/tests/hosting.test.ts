@@ -27,6 +27,22 @@ const app = createApp({ serveWeb: true, webDistPath: webDist, trustProxyHops: 0 
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 describe('same-origin production web hosting', () => {
+  it('reports a public release hash without reflecting other environment values', async () => {
+    const previous = process.env.RENDER_GIT_COMMIT;
+    try {
+      process.env.RENDER_GIT_COMMIT = 'a'.repeat(40);
+      const released = await request(app).get('/api/v1/health');
+      expect(released.headers['x-app-revision']).toBe('a'.repeat(40));
+      expect(released.body).toEqual({ status: 'ok' });
+      process.env.RENDER_GIT_COMMIT = 'private-configuration-fixture';
+      const invalid = await request(app).get('/api/v1/health');
+      expect(invalid.headers).not.toHaveProperty('x-app-revision');
+      expect(invalid.body).toEqual({ status: 'ok' });
+    } finally {
+      if (previous === undefined) delete process.env.RENDER_GIT_COMMIT;
+      else process.env.RENDER_GIT_COMMIT = previous;
+    }
+  });
   it.each(['/', '/create', '/history', '/cases/example/investigate'])(
     'serves the HTML app on a direct GET to %s',
     async (path) => {

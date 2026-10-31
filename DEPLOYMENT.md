@@ -145,8 +145,15 @@ monitoring. Sources: [Free limits](https://upstash.com/pricing/redis),
 2. Select or create a project **without paid billing**. If you already have a
    suitable restricted Gemini key in that project, you can keep using it.
 3. Otherwise choose **Create API key** for that project and copy the key.
-4. Save it as `GEMINI_API_KEY` in `.env`. Leave
+4. Save it as `GEMINI_API_KEY` in `.env`. The default remains
    `GEMINI_TEXT_MODEL=gemini-3.8-flash`.
+
+If 3.8 repeatedly returns a high-demand or unavailable response, you can explicitly
+select the verified free alternative `GEMINI_TEXT_MODEL=gemini-3.6-flash`. Set it
+in `.env` for local runs or in the Render service's environment for deployment.
+`configure:free` preserves either verified choice. The app does not switch models
+automatically, and paid or unverified models remain blocked by the free profile.
+Both models are listed with free text quotas in [Google's API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 The configured text model currently has a free tier. Do not enable billing
 to bypass rate limits. Current key setup is documented in
@@ -316,6 +323,18 @@ the worker's SDK version before spending retries. Google rejects the retired
 or newer and sends structured JSON using the current `response_format` wrapper.
 See [Google's migration guide](https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026).
 
+Google can also reject a complex response schema with HTTP 400 and "too many
+states for serving". The adapter sends a simpler decoding schema: array limits,
+numeric ranges, and timestamp requirements become field descriptions. The full
+Zod schema and canon checks still validate every response before it is saved.
+Invalid suspect/evidence counts, dates, ages, hints, and fact references remain
+rejected. Private worker events distinguish this as `PROVIDER_SCHEMA_REJECTED`.
+
+`PROVIDER_BUSY` means Google returned HTTP 503 for temporary model capacity.
+Allow the bounded retries to finish, then wait before using a manual retry.
+It is separate from `FREE_AI_QUOTA_EXCEEDED`; buying credits is not required
+by this deployment. An explicit free-model alternative is described in step 4.
+
 If the Blueprint page shows only **Retry**, read the error above its YAML
 preview. Render checks plan-specific restrictions in addition to the official
 JSON schema used by the local validator. Keep credentials in the dashboard's
@@ -364,9 +383,8 @@ The original `spec.md` is retained unchanged. Cloud provisioning, account-tier
 verification, and real provider calls require your accounts; local tests do not
 prove your external credentials or deployed resource limits.
 
-Local verification on 2026-10-30: all 182 automated tests, including 25 offline
-deployment-input checks, passed. The 14 hosted
-desktop/mobile browser checks passed, along with formatting, lint, TypeScript,
-production builds, Blueprint validation, and offline runtime checks. Provider
-responses were mocked; the media tests ran real ffmpeg. Linux Docker execution
-still needs GitHub CI because Docker is unavailable in this workspace.
+Local verification on 2026-10-31: all 211 automated tests, including 34 offline
+deployment-input checks and response-schema regressions, passed. Provider
+responses were mocked; the media tests ran real ffmpeg. The 14 hosted
+desktop/mobile browser checks were last verified on 2026-10-30. Linux Docker
+execution runs in GitHub CI because Docker is unavailable in this workspace.

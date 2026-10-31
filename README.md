@@ -41,6 +41,10 @@ version **2.0.0 or newer**. Install dependencies from this repository's updated
 lockfile; Google has retired the legacy 1.x Interactions protocol. The offline
 runtime check verifies this minimum version before deployment.
 
+The adapter simplifies Google's response decoding grammar while retaining the
+full local schema and canon validation. This avoids the provider's "too many
+states" schema error without accepting incomplete or inconsistent case files.
+
 Edit your untracked `.env`:
 
 ```dotenv
@@ -123,7 +127,7 @@ $env:STORAGE_SECRET_KEY = 'S3RVER'
 
 The free deployment checks cover provider/model guards, quota handling, bounded image responses, request pacing, process supervision, and real ffmpeg compilation of mocked provider images. Hosted browser checks cover the compiled application on desktop and mobile, including the Free AI mode banner and private-file isolation. External AI calls and cloud credentials require your accounts; Linux container verification runs in GitHub CI because Docker is unavailable in this workspace.
 
-Verified on 2026-10-30: all 182 automated tests, including 25 offline deployment-input checks and SDK 2 request serialization, passed. The 14 hosted browser checks passed, plus formatting, lint, TypeScript, production builds, Blueprint validation, and offline runtime checks.
+Verified on 2026-10-31: all 211 automated tests, including 34 offline deployment-input checks, SDK 2 request serialization, and response-schema regressions, passed. The 14 hosted browser checks were last verified on 2026-10-30. Formatting, lint, TypeScript, production builds, Blueprint validation, and offline runtime checks are part of the release checks.
 
 Implementation choices: the interface uses tokenized CSS and accessible native dialogs instead of Tailwind/Radix. Private media uses authenticated, signed, expiring streaming URLs rather than exposing object-store URLs; the specification explicitly permits authenticated streaming. Production deployment is prepared in `render.yaml` and `Dockerfile`; creating cloud resources remains an account setup step in the deployment guide.
 
