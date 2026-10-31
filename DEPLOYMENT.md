@@ -333,7 +333,8 @@ rejected. Private worker events distinguish this as `PROVIDER_SCHEMA_REJECTED`.
 `PROVIDER_BUSY` means Google returned HTTP 503 for temporary model capacity.
 Allow the bounded retries to finish, then wait before using a manual retry.
 It is separate from `FREE_AI_QUOTA_EXCEEDED`; buying credits is not required
-by this deployment. An explicit free-model alternative is described in step 4.
+by this deployment. The website explains this condition without exposing raw
+provider responses. An explicit free-model alternative is described in step 4.
 
 If the Blueprint page shows only **Retry**, read the error above its YAML
 preview. Render checks plan-specific restrictions in addition to the official
@@ -383,8 +384,8 @@ The original `spec.md` is retained unchanged. Cloud provisioning, account-tier
 verification, and real provider calls require your accounts; local tests do not
 prove your external credentials or deployed resource limits.
 
-Local verification on 2026-10-31: all 211 automated tests, including 34 offline
+Local verification on 2026-10-31: all 226 automated tests, including 34 offline
 deployment-input checks and response-schema regressions, passed. Provider
-responses were mocked; the media tests ran real ffmpeg. The 14 hosted
-desktop/mobile browser checks were last verified on 2026-10-30. Linux Docker
+responses were mocked; the media tests ran real ffmpeg. Hosted browser checks
+cover desktop/mobile rendering and provider-busy retry guidance. Linux Docker
 execution runs in GitHub CI because Docker is unavailable in this workspace.

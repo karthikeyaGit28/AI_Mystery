@@ -31,6 +31,8 @@ export default function Preparing() {
     if (status.data?.status === 'READY') navigate(`/cases/${id}/investigate`, { replace: true });
   }, [status.data?.status, id, navigate]);
   const quotaExceeded = status.data?.errorCode === 'FREE_AI_QUOTA_EXCEEDED';
+  const providerBusy =
+    status.data?.status === 'FAILED' && status.data.errorCode === 'PROVIDER_BUSY';
   const index =
     status.data?.status === 'READY'
       ? stages.length
@@ -47,16 +49,20 @@ export default function Preparing() {
       <h1>
         {quotaExceeded
           ? 'The free AI quota is used for now.'
-          : status.data?.status === 'FAILED'
-            ? 'A lead needs a second look.'
-            : 'Every detail has a purpose.'}
+          : providerBusy
+            ? 'The AI provider is busy right now.'
+            : status.data?.status === 'FAILED'
+              ? 'A lead needs a second look.'
+              : 'Every detail has a purpose.'}
       </h1>
       <p className="preparing-description">
         {quotaExceeded
           ? 'The provider’s free allowance has been used. Your case is saved. Retry after the provider’s quota resets; retrying immediately will not restore the allowance.'
-          : status.data?.status === 'FAILED'
-            ? 'The case could not be completed. Your saved progress and locked story will be reused when you retry.'
-            : 'We’re building a coherent case, then creating every piece of evidence. The truth is being sealed before your investigation begins.'}
+          : providerBusy
+            ? 'High demand has temporarily paused generation. Your case is saved. Wait a few minutes before retrying; completed steps and any locked story will be reused.'
+            : status.data?.status === 'FAILED'
+              ? 'The case could not be completed. Your saved progress and locked story will be reused when you retry.'
+              : 'We’re building a coherent case, then creating every piece of evidence. The truth is being sealed before your investigation begins.'}
       </p>
       {status.isError ? (
         <ErrorState error={status.error} retry={() => void status.refetch()} />
@@ -71,9 +77,12 @@ export default function Preparing() {
             <span>
               {quotaExceeded
                 ? status.data?.stageLabel || 'Waiting for the free AI quota to reset'
-                : status.data?.status === 'FAILED'
-                  ? 'Generation paused'
-                  : status.data?.stageLabel || 'Connecting to the case room…'}
+                : providerBusy
+                  ? status.data?.stageLabel ||
+                    'The AI provider is busy. Please wait before retrying.'
+                  : status.data?.status === 'FAILED'
+                    ? 'Generation paused'
+                    : status.data?.stageLabel || 'Connecting to the case room…'}
             </span>
           </div>
           <ol className="stage-list">
@@ -109,7 +118,9 @@ export default function Preparing() {
                 <p>
                   {quotaExceeded
                     ? 'This case has no retries left. Wait for the provider’s quota to reset before starting a new case.'
-                    : 'The retry limit has been reached. Please start a new case.'}
+                    : providerBusy
+                      ? 'This case has no retries left. Wait for demand to ease before starting a new case.'
+                      : 'The retry limit has been reached. Please start a new case.'}
                 </p>
               )}
               {retry.isError && <ErrorState error={retry.error} />}

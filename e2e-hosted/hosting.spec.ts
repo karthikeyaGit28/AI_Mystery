@@ -124,6 +124,43 @@ test('same-origin health and unknown API remain JSON under the SPA host', async 
   });
 });
 
+test('a busy AI service explains when to retry without starting a generation', async ({ page }) => {
+  let canRetry = true;
+  await page.route('**/api/v1/sessions/guest', (route) =>
+    route.fulfill({ json: { sessionReady: true } }),
+  );
+  await page.route('**/api/v1/cases/*/status', (route) =>
+    route.fulfill({
+      json: {
+        status: 'FAILED',
+        generationStage: 'GENERATING_BLUEPRINT',
+        errorCode: 'PROVIDER_BUSY',
+        stageLabel: 'The AI provider is busy. Please wait before retrying.',
+        canRetry,
+      },
+    }),
+  );
+  await page.goto('/cases/00000000-0000-4000-8000-000000000000/preparing');
+  await expect(
+    page.getByRole('heading', { name: 'The AI provider is busy right now.', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Your case is saved\. Wait a few minutes before retrying/),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry generation', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
+    false,
+  );
+  canRetry = false;
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Retry generation', exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText(
+      'This case has no retries left. Wait for demand to ease before starting a new case.',
+    ),
+  ).toBeVisible();
+});
+
 test('deep links use the built HTML while hashed assets keep immutable caching', async ({
   request,
 }) => {

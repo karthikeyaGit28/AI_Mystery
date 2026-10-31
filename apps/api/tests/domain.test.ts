@@ -4,7 +4,40 @@ import {
   assertSafePremise,
   hashValue,
   normalizeByteRange,
+  publicGenerationFailure,
 } from '../src/domain.js';
+
+describe('public generation failure boundary', () => {
+  it('exposes the allowlisted busy code for failed generation without provider details', () => {
+    expect(publicGenerationFailure('FAILED', 'PROVIDER_BUSY')).toBe('PROVIDER_BUSY');
+    expect(publicGenerationFailure('FAILED', 'FREE_AI_QUOTA_EXCEEDED')).toBe(
+      'FREE_AI_QUOTA_EXCEEDED',
+    );
+  });
+  it.each([
+    'QUEUED',
+    'GENERATING_BLUEPRINT',
+    'VALIDATING',
+    'GENERATING_TEXT',
+    'GENERATING_IMAGES',
+    'GENERATING_VIDEO',
+    'FINALIZING',
+    'READY',
+  ])('does not expose failure codes while generation is %s', (status) => {
+    expect(publicGenerationFailure(status, 'PROVIDER_BUSY')).toBeNull();
+    expect(publicGenerationFailure(status, 'FREE_AI_QUOTA_EXCEEDED')).toBeNull();
+  });
+  it.each([
+    undefined,
+    '503',
+    'UNAVAILABLE',
+    'INTERNAL_PROVIDER_ERROR',
+    'PROVIDER_BUSY: private provider response',
+    'PROVIDER_BUSY\nprivate prompt details',
+  ])('redacts unapproved provider error %s', (failureCode) => {
+    expect(publicGenerationFailure('FAILED', failureCode)).toBe('GENERATION_FAILED');
+  });
+});
 
 describe('deterministic scoring', () => {
   it.each([

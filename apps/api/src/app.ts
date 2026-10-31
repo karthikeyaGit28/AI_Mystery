@@ -507,7 +507,9 @@ export function createApp(
       stageLabel:
         errorCode === 'FREE_AI_QUOTA_EXCEEDED'
           ? 'The free AI quota has been used. Try again after the provider quota resets.'
-          : (stageLabels[record.status] ?? 'Preparing your case'),
+          : errorCode === 'PROVIDER_BUSY'
+            ? 'The AI provider is busy. Wait a little before retrying; your saved progress will be reused.'
+            : (stageLabels[record.status] ?? 'Preparing your case'),
       canRetry: record.status === 'FAILED' && record.manualRetries < 2,
       errorCode,
     });
